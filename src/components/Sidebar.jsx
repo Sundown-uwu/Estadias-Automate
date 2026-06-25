@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
-import { RefreshCw, Play } from 'lucide-react';
+import { RefreshCw, Play, LayoutDashboard, List } from 'lucide-react';
 
-export default function Sidebar({ devices = [], isScanning = false, onScan, onGlobalExecute }) {
+export default function Sidebar({ 
+  devices = [], 
+  isScanning = false, 
+  onScan, 
+  onGlobalExecute,
+  currentView,     // <-- RECUPERADO: Para saber en qué vista estamos
+  setCurrentView   // <-- RECUPERADO: Para cambiar de vista
+}) {
   
   // 📊 Cálculos en tiempo real
   const totalDevices = devices.length;
@@ -11,19 +18,45 @@ export default function Sidebar({ devices = [], isScanning = false, onScan, onGl
   // 🎛️ Estado local para el formulario de Tarea Global
   const [globalTask, setGlobalTask] = useState('');
   const [globalUrl, setGlobalUrl] = useState('');
-  const [globalComment, setGlobalComment] = useState('');
+  const [globalComments, setGlobalComments] = useState([]); // Arreglo de frases
+  const [inputValue, setInputValue] = useState(''); // Lo que el usuario está escribiendo
+  const [globalDelay, setGlobalDelay] = useState('00:15'); // 15 segundos por defecto
+
+  // Función para capturar el "Enter" o la "Coma"
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      const newComment = inputValue.trim();
+      
+      // Evitamos añadir etiquetas vacías o repetidas
+      if (newComment && !globalComments.includes(newComment)) {
+        setGlobalComments([...globalComments, newComment]);
+      }
+      setInputValue(''); // Limpiamos el input para la siguiente frase
+    }
+  };
+
+  // Función para eliminar un comentario al dar clic en la "X"
+  const removeComment = (indexToRemove) => {
+    setGlobalComments(globalComments.filter((_, index) => index !== indexToRemove));
+  };
 
   const handleGlobalSubmit = () => {
     if (!globalTask || !globalUrl) {
       return alert("Por favor selecciona una tarea e ingresa una URL.");
     }
-    // Disparamos la función maestra que viene desde App.jsx
-    onGlobalExecute(globalTask, globalUrl, globalComment);
+    if (globalTask === 'Comentar en un post' && globalComments.length === 0) {
+      return alert("Por favor añade al menos un comentario a la lista.");
+    }
+
+    // Le pasamos el ARREGLO de comentarios en lugar del string
+    onGlobalExecute(globalTask, globalUrl, globalComments, globalDelay);
     
     // Limpiamos los campos después de enviar
     setGlobalTask('');
     setGlobalUrl('');
-    setGlobalComment('');
+    setGlobalComments([]);
+    setInputValue('');
   };
 
   return (
@@ -33,6 +66,33 @@ export default function Sidebar({ devices = [], isScanning = false, onScan, onGl
         <p className="text-sm text-gray-400 mb-8">
           Dashboard de automatización<br />de interacciones
         </p>
+
+        {/* 🔥 NAVEGACIÓN RECUPERADA 🔥 */}
+        <div className="space-y-2 mb-8">
+          <button 
+            onClick={() => setCurrentView('dashboard')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              currentView === 'dashboard' 
+                ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20' 
+                : 'text-gray-400 hover:bg-[#1e293b] hover:text-white'
+            }`}
+          >
+            <LayoutDashboard size={18} />
+            Dispositivos
+          </button>
+          <button 
+            onClick={() => setCurrentView('historial')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              currentView === 'historial' 
+                ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20' 
+                : 'text-gray-400 hover:bg-[#1e293b] hover:text-white'
+            }`}
+          >
+            <List size={18} />
+            Historial de Tareas
+          </button>
+        </div>
+        {/* =========================== */}
 
         <h3 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Resumen</h3>
         <div className="space-y-4 text-base mb-8">
@@ -50,7 +110,7 @@ export default function Sidebar({ devices = [], isScanning = false, onScan, onGl
           </div>
         </div>
 
-        {/* 🔥 NUEVA SECCIÓN: TAREA GLOBAL */}
+        {/* SECCIÓN DE TAREA GLOBAL */}
         <div className="pt-6 border-t border-[#1e293b]">
           <h3 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase text-center">Tarea Global</h3>
           <p className="text-xs text-gray-400 mb-4 text-center">Aplica a todos los dispositivos activos</p>
@@ -76,13 +136,57 @@ export default function Sidebar({ devices = [], isScanning = false, onScan, onGl
               onChange={(e) => setGlobalUrl(e.target.value)}
             />
 
-            {globalTask === 'Comentar en un post' && (
-              <textarea 
-                placeholder="Escribe tu comentario aquí..." 
-                className="w-full bg-[#111827] border border-[#334155] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none h-16"
-                value={globalComment}
-                onChange={(e) => setGlobalComment(e.target.value)}
+            {/* 🔥 NUEVO: Control de espera en formato MM:SS */}
+            <div className="flex items-center justify-between bg-[#111827] border border-[#334155] rounded-lg px-3 py-2">
+              <span className="text-sm text-gray-300">Espera (MM:SS):</span>
+              <input 
+                type="text" 
+                placeholder="00:15"
+                maxLength={5}
+                className="w-16 bg-[#272727] text-center text-sm text-white rounded border border-[#3f3f3f] focus:outline-none focus:border-blue-500 tracking-widest"
+                value={globalDelay}
+                onChange={(e) => {
+                  // Filtramos para que solo acepte números y el símbolo ":"
+                  const valorLimpio = e.target.value.replace(/[^0-9:]/g, '');
+                  setGlobalDelay(valorLimpio);
+                }}
               />
+            </div>
+
+            {globalTask === 'Comentar en un post' && (
+              <div className="flex flex-col gap-1">
+                <div 
+                  className="w-full bg-[#111827] border border-[#334155] rounded-lg p-2 flex flex-wrap gap-2 focus-within:border-blue-500 transition-colors min-h-[80px] max-h-[150px] overflow-y-auto custom-scrollbar"
+                >
+                  {/* Aquí mapeamos y dibujamos cada etiqueta */}
+                  {globalComments.map((comment, index) => (
+                    <span 
+                      key={index} 
+                      className="flex items-center gap-2 bg-[#272727] text-white text-xs font-medium px-3 py-1.5 rounded-full border border-[#3f3f3f]"
+                    >
+                      {comment}
+                      <button 
+                        type="button" 
+                        onClick={() => removeComment(index)}
+                        className="hover:text-red-400 transition-colors focus:outline-none"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                  
+                  {/* Input invisible que genera las etiquetas */}
+                  <input 
+                    type="text" 
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={globalComments.length === 0 ? "Escribe un comentario..." : "Añadir otro..."}
+                    className="flex-1 bg-transparent text-sm text-white focus:outline-none min-w-[140px] py-1 px-1"
+                  />
+                </div>
+                <span className="text-[10px] text-gray-500 ml-1">Introduce una coma o presiona Enter detrás de cada etiqueta</span>
+              </div>
             )}
 
             <button 

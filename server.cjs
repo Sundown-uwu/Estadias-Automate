@@ -3,11 +3,62 @@ const cors = require('cors');
 const { remote } = require('webdriverio');
 const { exec } = require('child_process');
 const util = require('util');
+const path = require('path'); // Requerido para la ruta de la base de datos
+const { Sequelize, DataTypes } = require('sequelize'); // Importamos Sequelize
+
 const execPromise = util.promisify(exec);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ==========================================
+// 💾 CONFIGURACIÓN E INICIALIZACIÓN DE LA DB
+// ==========================================
+// Crea el archivo "autocontrol.sqlite" automáticamente en la raíz de tu proyecto backend
+const sequelize = new Sequelize({
+  dialect: 'sqlite',
+  storage: path.join(__dirname, 'autocontrol.sqlite'),
+  logging: false // Cambia a console.log si quieres auditar las consultas SQL nativas en la terminal
+});
+
+// Definición del Modelo de Historial (Tabla)
+const HistorialTarea = sequelize.define('HistorialTarea', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  deviceId: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  deviceName: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  action: {
+    type: DataTypes.STRING, // 'Seguir cuenta', 'Reaccionar a un post', etc.
+    allowNull: false
+  },
+  url: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  comment: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  status: {
+    type: DataTypes.STRING, // 'Éxito', 'Fallido', 'Error'
+    allowNull: false
+  },
+  mensaje: {
+    type: DataTypes.TEXT // Respuesta de la función o mensaje del catch
+  }
+}, {
+  timestamps: true // Agrega automáticamentecreatedAt y updatedAt
+});
 
 // ==========================================
 // FUNCIÓN AUXILIAR: Genera las capabilities
@@ -78,9 +129,8 @@ async function seguirUsuarioInstagram(deviceId, deviceName, urlPerfil) {
         await driver.pause(2000); 
 
         console.log('🚀 Paso 2: Abriendo el link DIRECTAMENTE en la app de Instagram...');
-        // Obligamos al sistema a usar Instagram (com.instagram.android) para abrir la URL
         await driver.execute('mobile: deepLink', { url: urlLimpia, package: 'com.instagram.android' });
-        await driver.pause(6000); // Tiempo para que cargue la interfaz nativa del perfil
+        await driver.pause(6000); 
 
         console.log('👤 Paso 3: Escaneando botón de Seguir con Red de Seguridad...');
         let botonSeguir = null;
@@ -180,8 +230,8 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
         }
 
         if (botonALikear) {
-            const descripcion = await botonALikear.getAttribute('content-desc');
-            if (descripcion === "Ya no me gusta") {
+            const description = await botonALikear.getAttribute('content-desc');
+            if (description === "Ya no me gusta") {
                 return { success: true, mensaje: `✅ El post/reel ya tenía tu "Me gusta". Misión cumplida.` };
             } else {
                 await botonALikear.click();
@@ -232,7 +282,7 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
 // ==========================================
 async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoComentario) {
     const urlLimpia = urlPost.split('?')[0];
-    console.log(`🔌 [${deviceId}] Conectando a Appium para COMENTAR en: ${urlLimpia}`);
+    console.log(`🔌 [${deviceId}] Conending a Appium para COMENTAR en: ${urlLimpia}`);
     
     const configDeSesion = obtenerConfiguracionDispositivo(deviceId, deviceName);
     const driver = await remote(configDeSesion);
@@ -408,17 +458,30 @@ app.get('/api/scan-devices', async (req, res) => {
 });
 
 // ==========================================
-// ENDPOINT MAESTRO DINÁMICO CONECTADO CON REACT
+// ENDPOINT MAESTRO DINÁMICO ACTUALIZADO CON DB
 // ==========================================
 app.post('/api/execute-task', async (req, res) => {
     const { deviceId, deviceName, action, url, comment } = req.body;
-    
+
+    // 1. Creamos una variable para guardar el comentario final que usaremos
+    let comentarioFinal = "";
+
+    // 2. Verificamos si lo que llegó es una lista (arreglo) y tiene elementos
+    if (Array.isArray(comment)) {
+        if (comment.length >0) {
+        const indiceAleatorio = Math.floor(Math.random() * comment.length);
+        comentarioFinal = comment[indiceAleatorio];
+        }
+    }else if(comment) {
+        comentarioFinal = comment;
+    }
+
     console.log(`\n=================================================`);
     console.log(`🤖 ORDEN RECIBIDA DESDE LA INTERFAZ WEB`);
     console.log(`📱 Dispositivo UDID: ${deviceId}`);
     console.log(`🎬 Acción requerida: "${action}"`);
     console.log(`🔗 URL objetivo: ${url}`);
-    if (comment) console.log(`💬 Comentario: "${comment}"`);
+    if (comentarioFinal) console.log(`💬 Comentario: "${comentarioFinal}"`);
     console.log(`=================================================\n`);
 
     try {
@@ -434,7 +497,7 @@ app.post('/api/execute-task', async (req, res) => {
                 break;
                 
             case 'Comentar en un post':
-                const textoFinal = comment || "¡Excelente contenido! 🔥";
+                const textoFinal = comentarioFinal || "¡Excelente contenido! 🔥";
                 resultado = await publicarComentarioInstagram(deviceId, deviceName, url, textoFinal);
                 break;
 
@@ -448,6 +511,17 @@ app.post('/api/execute-task', async (req, res) => {
                 return res.status(400).json({ success: false, message: "❌ Acción no reconocida por el servidor." });
         }
 
+        // 🔥 REGISTRO EN LA BASE DE DATOS (ÉXITO O ADVERTENCIA)
+        await HistorialTarea.create({
+            deviceId,
+            deviceName,
+            action,
+            url,
+            comment: comentarioFinal,
+            status: resultado.success ? 'Éxito' : 'Fallido',
+            mensaje: resultado.mensaje
+        });
+
         res.status(200).json({ 
             success: true, 
             message: resultado.mensaje 
@@ -455,6 +529,18 @@ app.post('/api/execute-task', async (req, res) => {
 
     } catch (error) {
         console.error("❌ Error catastrófico en la automatización:", error.message);
+
+        // ❌ REGISTRO EN LA BASE DE DATOS (ERROR / CRASH DE APPIUM)
+        await HistorialTarea.create({
+            deviceId,
+            deviceName,
+            action,
+            url,
+            comment: comentarioFinal,
+            status: 'Error',
+            mensaje: error.message
+        });
+
         res.status(500).json({ 
             success: false, 
             message: "Error interno en Appium: " + error.message 
@@ -462,7 +548,33 @@ app.post('/api/execute-task', async (req, res) => {
     }
 });
 
-// INICIAR SERVIDOR
+// ==========================================
+// 🚀 NUEVO ENDPOINT: CONSULTAR HISTORIAL DESDE REACT
+// ==========================================
+app.get('/api/history', async (req, res) => {
+    try {
+        // Trae todos los logs ordenados por fecha de creación (los más nuevos primero)
+        const historial = await HistorialTarea.findAll({
+            order: [['createdAt', 'DESC']]
+        });
+        res.status(200).json({ success: true, history: historial });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==========================================
+// INICIAR SERVIDOR CON CONEXIÓN ASÍNCRONA A LA DB
+// ==========================================
 const PORT = 3000;
 app.use(express.static('public')); 
-app.listen(PORT, () => console.log(`🚀 Servidor unificado listo en http://localhost:${PORT}`));
+
+// Sincronizamos las tablas y luego encendemos Express
+sequelize.sync({ force: false }) // 'force: false' asegura que tus datos no se borren al reiniciar el servidor
+  .then(() => {
+    console.log('💾 Base de datos SQLite sincronizada correctamente.');
+    app.listen(PORT, () => console.log(`🚀 Servidor unificado listo en http://localhost:${PORT}`));
+  })
+  .catch(err => {
+    console.error('❌ Error crítico al inicializar la Base de Datos:', err);
+  });

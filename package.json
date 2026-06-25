@@ -16,6 +16,8 @@
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "sequelize": "^6.37.8",
+    "sqlite3": "^6.0.1",
     "webdriverio": "^9.27.2"
   },
   "devDependencies": {
