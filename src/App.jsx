@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DashboardLayout from './layouts/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 import Historial from './pages/Historial'; // <-- Importamos la nueva página
@@ -7,22 +7,62 @@ import axios from 'axios';
 function App() {
   const [devices, setDevices] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
-  
-  // 🔥 ESTADO DE NAVEGACIÓN ('dashboard' o 'historial')
   const [currentView, setCurrentView] = useState('dashboard');
 
-  const scanDevices = async () => {
+useEffect(() => {
+    const cargarDispositivos = async () => {
+      try {
+        const response = await axios.get('http://localhost:3000/api/devices');
+        if (response.data.success) {
+          
+          // 🔥 Actualización Inteligente: Comparamos con el estado anterior
+          setDevices(prevDevices => {
+            const nuevosDispositivos = response.data.devices;
+            
+            return nuevosDispositivos.map(nuevoDev => {
+              // Buscamos si el dispositivo ya existía en nuestra pantalla
+              const prevDev = prevDevices.find(d => d.id === nuevoDev.id);
+              
+              // Si el dispositivo está ocupado haciendo una tarea, conservamos sus textos visuales
+              if (prevDev && (prevDev.status === "En cola..." || prevDev.status === "Ejecutando..." || prevDev.status === "Hecho!")) {
+                return {
+                  ...nuevoDev, // Traemos la batería y conexión nueva
+                  status: prevDev.status, // Pero respetamos su estado de tarea
+                  action: prevDev.action,
+                  url: prevDev.url,
+                  comment: prevDev.comment
+                };
+              }
+              
+              // Si no estaba haciendo nada, lo actualizamos normal
+              return nuevoDev;
+            });
+          });
+
+        }
+      } catch (error) {
+        console.error("Error al cargar dispositivos en segundo plano:", error);
+      }
+    };
+
+    // 1. Cargamos los dispositivos inmediatamente al abrir la página
+    cargarDispositivos();
+
+    // 2. Programamos el escaneo silencioso cada 3 segundos (3000 ms)
+    const intervalo = setInterval(() => {
+      cargarDispositivos();
+    }, 3000);
+
+    // 3. Limpiamos el temporizador por seguridad si cambias de pantalla
+    return () => clearInterval(intervalo);
+  }, []);
+
+const scanDevices = async () => {
     setIsScanning(true);
     try {
-      const response = await axios.get('http://localhost:3000/api/scan-devices');
+      const response = await axios.get('http://localhost:3000/api/devices');
       if (response.data.success) {
-        const nuevosDispositivos = response.data.devices;
-        setDevices(prevDevices => {
-          const filtrados = nuevosDispositivos.filter(
-            nuevo => !prevDevices.some(actual => actual.udid === nuevo.udid)
-          );
-          return [...prevDevices, ...filtrados];
-        });
+        setDevices(response.data.devices);
       }
     } catch (error) {
       console.error("Error al escanear:", error);

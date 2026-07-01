@@ -79,6 +79,8 @@ export default function Dashboard({ devices, setDevices, isScanning, scanDevices
           {devices.map(device => (
             <DeviceCard 
               key={device.id}
+              id={device.id}
+              udid={device.udid}
               name={device.name}
               active={device.active}
               battery={device.battery}

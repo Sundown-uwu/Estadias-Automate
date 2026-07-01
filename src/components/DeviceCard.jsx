@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Battery, ChevronDown, Heart, MessageCircle, UserPlus, Rss, Play, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Battery, ChevronDown, Heart, MessageCircle, UserPlus, Rss, Play, Loader2, Edit2 } from 'lucide-react';
 import LinkModal from './LinkModal';
+import axios from 'axios';
 
 const TaskButton = ({ icon: Icon, text, iconColor, onClick, disabled }) => (
   <button 
@@ -15,10 +16,20 @@ const TaskButton = ({ icon: Icon, text, iconColor, onClick, disabled }) => (
   </button>
 );
 
-export default function DeviceCard({ name, active, battery, action, status, onToggle, onSetAction, onExecute }) {
+export default function DeviceCard({ id, udid, name, customName, isConnected = true, active, battery, action, status, onToggle, onSetAction, onExecute, onRefresh }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState('');
+  
+  // 🔥 ESTADOS PARA RENOMBRAR Y OPTIMISTIC UI
+  const [isEditing, setIsEditing] = useState(false);
+  const [newName, setNewName] = useState(customName || name);
+  const [localName, setLocalName] = useState(customName || name);
+
+  // 🔥 Sincroniza el nombre local si llegan cambios del servidor
+  useEffect(() => {
+    setLocalName(customName || name);
+  }, [customName, name]);
 
   const toggleExpand = () => setIsExpanded(!isExpanded);
 
@@ -31,28 +42,86 @@ export default function DeviceCard({ name, active, battery, action, status, onTo
     if (onSetAction) onSetAction(taskName, url, comment);
   };
 
-  // Helper dinámico para cambiar el color de la píldora inferior según el flujo de Figma
+// 🔥 FUNCIÓN MEJORADA PARA GUARDAR
+  const handleRename = async () => {
+    setIsEditing(false); 
+    
+    if (newName === localName) return; 
+
+    setLocalName(newName);
+
+    // 👇 Usamos udid o id, el que esté disponible
+    const identificador = udid || id; 
+
+    try {
+      // 👇 Inyectamos la variable "identificador" en la URL
+      await axios.put(`http://localhost:3000/api/devices/${identificador}/rename`, {
+        customName: newName
+      });
+      if (onRefresh) onRefresh(); 
+    } catch (error) {
+      console.error("Error al renombrar el dispositivo:", error);
+      setLocalName(customName || name);
+    }
+  };
+
   const getStatusStyles = () => {
     if (status === "Ejecutando") return "bg-[#2563eb]/20 text-[#60a5fa] border border-[#2563eb]/40 animate-pulse";
     if (status === "Hecho!") return "bg-[#16a34a]/20 text-[#4ade80] border border-[#16a34a]/40";
-    return "bg-[#1f2937] text-gray-300"; // En espera
+    return "bg-[#1f2937] text-gray-300";
   };
 
   const isRunning = status === "Ejecutando";
+  const displayName = localName; // 🔥 AHORA USAMOS EL NOMBRE LOCAL
 
   return (
     <>
-      <div className="bg-[#12151c] border border-[#1e293b] rounded-2xl w-full max-w-[350px] overflow-hidden transition-all duration-300 shadow-xl relative">
+      <div className={`bg-[#12151c] border rounded-2xl w-full max-w-[350px] overflow-hidden transition-all duration-300 shadow-xl relative ${
+        isConnected ? 'border-[#1e293b]' : 'border-gray-800 opacity-60 grayscale'
+      }`}>
         <div className="p-5 pb-0">
           <div className="flex justify-between items-start mb-6">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h3 className="text-xl font-bold text-white">{name}</h3>
-                <div className={`w-2.5 h-2.5 rounded-full ${active ? 'bg-green-500' : 'bg-gray-600'}`}></div>
+                
+                {/* 🔥 Lógica condicional: Input vs Texto + Botón */}
+                {isEditing ? (
+                  <input 
+                    type="text" 
+                    className="bg-[#1a2233] text-white px-2 py-0.5 rounded text-xl font-bold outline-none border border-[#3b82f6] w-[180px]"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onBlur={handleRename}
+                    onKeyDown={(e) => e.key === 'Enter' && handleRename()}
+                    autoFocus
+                  />
+                ) : (
+                  <>
+                    <h3 className="text-xl font-bold text-white transition-colors">
+                      {displayName}
+                    </h3>
+                    
+                    {/* 🔥 Nuevo botón de edición */}
+                    {isConnected && (
+                      <button 
+                        onClick={() => {
+                          setNewName(localName);
+                          setIsEditing(true);
+                        }}
+                        className="text-gray-500 hover:text-[#3b82f6] transition-colors p-1"
+                        title="Editar nombre"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                    )}
+                  </>
+                )}
+
+                <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? (active ? 'bg-green-500' : 'bg-gray-600') : 'bg-gray-700'}`}></div>
               </div>
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-gray-400 font-medium">{active ? 'Activo' : 'Inactivo'}</span>
-                {battery ? (
+                <span className="text-gray-400 font-medium">{isConnected ? (active ? 'Activo' : 'Inactivo') : 'Desconectado'}</span>
+                {battery && isConnected ? (
                   <div className="flex items-center gap-1.5 text-green-500 font-medium">
                     <Battery size={16} />
                     <span className="text-gray-300">{battery}%</span>
@@ -64,8 +133,9 @@ export default function DeviceCard({ name, active, battery, action, status, onTo
                 )}
               </div>
             </div>
-            <div onClick={!isRunning ? onToggle : null} className={`w-[48px] h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${active ? 'bg-[#5e5c8a]' : 'bg-[#374151]'} ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
-              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${active ? 'translate-x-6' : ''}`}></div>
+            
+            <div onClick={!isRunning && isConnected ? onToggle : null} className={`w-[48px] h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${active && isConnected ? 'bg-[#5e5c8a]' : 'bg-[#374151]'} ${isRunning || !isConnected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${active && isConnected ? 'translate-x-6' : ''}`}></div>
             </div>
           </div>
         </div>
@@ -76,20 +146,19 @@ export default function DeviceCard({ name, active, battery, action, status, onTo
             <h4 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Seleccione una tarea</h4>
             
             <div className="grid grid-cols-2 gap-3 mb-5">
-              <TaskButton icon={Heart} text="Reaccionar a un post" iconColor="text-red-400" onClick={() => handleOpenTask("Reaccionar a un post")} disabled={isRunning} />
-              <TaskButton icon={MessageCircle} text="Comentar en un post" iconColor="text-blue-400" onClick={() => handleOpenTask("Comentar en un post")} disabled={isRunning} />
-              <TaskButton icon={UserPlus} text="Seguir cuenta" iconColor="text-purple-400" onClick={() => handleOpenTask("Seguir cuenta")} disabled={isRunning} />
-              <TaskButton icon={Rss} text="Mirar transmisión" iconColor="text-yellow-400" onClick={() => handleOpenTask("Mirar transmisión")} disabled={isRunning} />
+              <TaskButton icon={Heart} text="Reaccionar a un post" iconColor="text-red-400" onClick={() => handleOpenTask("Reaccionar a un post")} disabled={isRunning || !isConnected} />
+              <TaskButton icon={MessageCircle} text="Comentar en un post" iconColor="text-blue-400" onClick={() => handleOpenTask("Comentar en un post")} disabled={isRunning || !isConnected} />
+              <TaskButton icon={UserPlus} text="Seguir cuenta" iconColor="text-purple-400" onClick={() => handleOpenTask("Seguir cuenta")} disabled={isRunning || !isConnected} />
+              <TaskButton icon={Rss} text="Mirar transmisión" iconColor="text-yellow-400" onClick={() => handleOpenTask("Mirar transmisión")} disabled={isRunning || !isConnected} />
             </div>
 
-            {/* BOTÓN DE DISPARO CON CONEXIÓN BACKEND */}
             <button 
               onClick={onExecute}
-              disabled={!action || isRunning || !active}
+              disabled={!action || isRunning || !active || !isConnected}
               className={`w-full flex items-center justify-center gap-2.5 font-semibold py-3.5 rounded-xl transition-colors mb-5 ${
                 isRunning 
                   ? 'bg-[#2563eb] text-white cursor-wait' 
-                  : action && active
+                  : action && active && isConnected
                     ? 'bg-[#3b82f6] hover:bg-[#2563eb] text-white cursor-pointer shadow-lg shadow-blue-500/20' 
                     : 'bg-[#1a2233] text-gray-500 cursor-not-allowed'
               }`}
@@ -102,7 +171,7 @@ export default function DeviceCard({ name, active, battery, action, status, onTo
               ) : (
                 <>
                   <Play size={18} />
-                  {action ? (active ? 'Ejecutar tarea' : 'Active el dispositivo') : 'Configurar tarea primero'}
+                  {action ? (active && isConnected ? 'Ejecutar tarea' : 'Active el dispositivo') : 'Configurar tarea primero'}
                 </>
               )}
             </button>
@@ -111,23 +180,21 @@ export default function DeviceCard({ name, active, battery, action, status, onTo
 
         <div className="bg-[#0e1117] px-5 py-3 border-t border-[#1e293b] flex items-center justify-between">
           <div className="flex gap-2.5">
-            {/* Píldora de estado dinámica ajustada al diseño exacto de Figma */}
             <span className={`text-xs px-3.5 py-1.5 rounded-full font-semibold transition-all duration-300 ${getStatusStyles()}`}>
               {status}
             </span>
             {action && <span className="bg-[#3b82f6]/10 text-[#60a5fa] border border-[#3b82f6]/20 text-xs px-3.5 py-1.5 rounded-full font-semibold">{action}</span>}
           </div>
-          <button onClick={toggleExpand} className="p-1 rounded-full hover:bg-[#1a2233] transition-colors group">
-            <ChevronDown size={20} className={`text-gray-500 group-hover:text-white transition-transform duration-300 ${isExpanded ? 'rotate-180 text-white' : ''}`} />
+          <button onClick={toggleExpand} disabled={!isConnected} className={`p-1 rounded-full transition-colors group ${!isConnected ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#1a2233]'}`}>
+            <ChevronDown size={20} className={`text-gray-500 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-white' : 'group-hover:text-white'}`} />
           </button>
         </div>
       </div>
 
-<LinkModal 
+      <LinkModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
         taskName={selectedTask}
-        // Usamos la función que ya creaste arriba, la cual ya sabe cómo comunicarse con el Dashboard
         onConfirm={handleConfirmTask} 
       />
     </>

@@ -5,6 +5,8 @@ const { exec } = require('child_process');
 const util = require('util');
 const path = require('path'); // Requerido para la ruta de la base de datos
 const { Sequelize, DataTypes } = require('sequelize'); // Importamos Sequelize
+const Dispositivo = require('./models/Dispositivo.cjs');
+const HistorialTarea = require('./models/HistorialTarea.cjs'); 
 
 const execPromise = util.promisify(exec);
 
@@ -16,49 +18,7 @@ app.use(express.json());
 // 💾 CONFIGURACIÓN E INICIALIZACIÓN DE LA DB
 // ==========================================
 // Crea el archivo "autocontrol.sqlite" automáticamente en la raíz de tu proyecto backend
-const sequelize = new Sequelize({
-  dialect: 'sqlite',
-  storage: path.join(__dirname, 'autocontrol.sqlite'),
-  logging: false // Cambia a console.log si quieres auditar las consultas SQL nativas en la terminal
-});
-
-// Definición del Modelo de Historial (Tabla)
-const HistorialTarea = sequelize.define('HistorialTarea', {
-  id: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    autoIncrement: true
-  },
-  deviceId: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  deviceName: {
-    type: DataTypes.STRING,
-    allowNull: true
-  },
-  action: {
-    type: DataTypes.STRING, // 'Seguir cuenta', 'Reaccionar a un post', etc.
-    allowNull: false
-  },
-  url: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  comment: {
-    type: DataTypes.TEXT,
-    allowNull: true
-  },
-  status: {
-    type: DataTypes.STRING, // 'Éxito', 'Fallido', 'Error'
-    allowNull: false
-  },
-  mensaje: {
-    type: DataTypes.TEXT // Respuesta de la función o mensaje del catch
-  }
-}, {
-  timestamps: true // Agrega automáticamentecreatedAt y updatedAt
-});
+const sequelize = require('./config/database.cjs');
 
 // ==========================================
 // FUNCIÓN AUXILIAR: Genera las capabilities
@@ -403,6 +363,52 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
 // SECCIÓN 4: ENDPOINTS DE LA API (Express)
 // ==========================================
 
+// ==========================================
+// FUNCIÓN AUXILIAR: Obtener dispositivos físicos y su batería
+// ==========================================
+async function obtenerDispositivosDeAdb() {
+  try {
+    const { stdout } = await execPromise('adb devices');
+    const lineas = stdout.trim().split('\n');
+    const promesasDispositivos = [];
+
+    for (let i = 1; i < lineas.length; i++) {
+      const linea = lineas[i].trim();
+      
+      if (linea && linea.endsWith('device')) {
+        const udid = linea.split('\t')[0];
+        
+        promesasDispositivos.push((async () => {
+          let nivelBateria = 100; // Default
+
+          try {
+            const { stdout: batteryStdout } = await execPromise(`adb -s ${udid} shell dumpsys battery`);
+            const coincidencia = batteryStdout.match(/level:\s*(\d+)/);
+            if (coincidencia) {
+              nivelBateria = parseInt(coincidencia[1], 10);
+            }
+          } catch (batteryError) {
+            console.error(`⚠️ No se pudo leer batería de [${udid}]:`, batteryError.message);
+          }
+
+          // Retornamos el objeto básico para que la ruta de la DB lo procese
+          return {
+            udid: udid,
+            battery: nivelBateria
+          };
+        })());
+      }
+    }
+    
+    // Esperamos a que terminen de leerse todas las baterías
+    return await Promise.all(promesasDispositivos);
+
+  } catch (error) {
+    console.error('⚠️ Error al buscar dispositivos en ADB:', error);
+    return [];
+  }
+}
+
 // Ruta optimizada para escanear celulares y extraer su batería real
 app.get('/api/scan-devices', async (req, res) => {
     try {
@@ -563,6 +569,118 @@ app.get('/api/history', async (req, res) => {
     }
 });
 
+app.get('/api/devices', async (req, res) => {
+    try {
+        // 1. Obtener todos los celulares guardados en la Base de Datos SQLite
+        const dbDevices = await Dispositivo.findAll();
+
+        // 2. Hacer el escaneo físico actual (obtiene udid y battery mediante promesas de ADB)
+        const conectadosFisicamente = await obtenerDispositivosDeAdb(); 
+
+        // 3. Cruzar los datos para saber cuáles están online, inyectar batería y registrar nuevos
+        const dispositivosActualizados = [];
+
+        // Primero, procesamos los que están físicamente conectados ahora mismo
+        for (const fisic of conectadosFisicamente) {
+            // Si es nuevo, lo guardamos. Si ya existe, mantiene sus datos intactos.
+            // Nota: Aquí pasamos el name genérico de ADB por si es la primera vez que se registra
+            const [dispositivoDb] = await Dispositivo.findOrCreate({
+                where: { udid: fisic.udid },
+                defaults: { name: fisic.name || `Android (${fisic.udid})`, customName: "" }
+            });
+
+            dispositivosActualizados.push({
+                id: dispositivoDb.udid,
+                udid: dispositivoDb.udid,
+                name: dispositivoDb.customName || dispositivoDb.name, // Si tiene alias (customName), usa el alias
+                customName: dispositivoDb.customName,
+                originalName: dispositivoDb.name,
+                connected: true,      // Para tu lógica de control interna
+                active: true,         // 🔥 Esto le dice al Switch de React que se renderice ACTIVADO por defecto
+                status: "En espera",  // Estado para dispositivos conectados
+                action: null,
+                url: "",
+                comment: "",
+                battery: fisic.battery // 🔋 Aquí inyectamos el nivel real que vino desde ADB
+            });
+        }
+
+        // Ahora, buscamos los que están en la DB pero NO se detectaron físicamente (Offline)
+        for (const dbDev of dbDevices) {
+            const estaConectado = conectadosFisicamente.some(f => f.udid === dbDev.udid);
+            
+            if (!estaConectado) {
+                dispositivosActualizados.push({
+                    id: dbDev.udid,
+                    udid: dbDev.udid,
+                    name: dbDev.customName || dbDev.name,
+                    customName: dbDev.customName,
+                    originalName: dbDev.name,
+                    connected: false,     // Desconectado físicamente
+                    active: false,        // 🔥 Esto le dice al Switch de React que se ponga INACTIVO por defecto
+                    status: "Desconectado", // Esto le dirá a React que pinte la tarjeta en gris
+                    action: null,
+                    url: "",
+                    comment: "",
+                    battery: 0            // Si está desconectado, marcamos 0 en la batería
+                });
+            }
+        }
+
+        // Devolvemos la respuesta unificada a React
+        // Nota: Asegúrate de revisar si tu Frontend espera recibir el array directo o dentro de un objeto:
+        // Si tu frontend usaba res.data directamente como array, usa: res.json(dispositivosActualizados);
+        // Si usaba res.data.devices, deja esta línea intacta:
+        res.json({ success: true, devices: dispositivosActualizados });
+    } catch (error) {
+        console.error("❌ Error en la API /api/devices unificada:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ==========================================
+// RUTA PARA RENOMBRAR DISPOSITIVOS (CON DIAGNÓSTICO)
+// ==========================================
+app.put('/api/devices/:udid/rename', async (req, res) => {
+    console.log("\n====== 🟡 INTENTO DE RENOMBRAR DISPOSITIVO ======");
+    console.log("➡️ UDID recibido del cliente:", req.params.udid);
+    console.log("➡️ Nuevo nombre (customName) recibido:", req.body.customName);
+
+    try {
+        const { udid } = req.params;
+        const { customName } = req.body;
+
+        // Intentamos buscar el dispositivo en SQLite
+        const dispositivo = await Dispositivo.findOne({ where: { udid: udid } });
+
+        if (dispositivo) {
+            console.log("✨ Dispositivo encontrado en la base de datos vieja:", dispositivo.name);
+            
+            // Actualizamos y guardamos
+            dispositivo.customName = customName;
+            await dispositivo.save();
+            
+            console.log("✅ ¡ÉXITO! Guardado correctamente en la base de datos SQLite.");
+            return res.json({ success: true, message: 'Nombre actualizado correctamente' });
+        } else {
+            // 🔥 HIPÓTESIS: A veces el dispositivo está conectado pero aún no existe un registro en la BD
+            console.log("❓ El dispositivo no existía en la BD. Creando un registro nuevo...");
+            
+            await Dispositivo.create({
+                udid: udid,
+                name: udid, // Usamos el udid temporalmente como nombre base
+                customName: customName
+            });
+
+            console.log("✅ ¡ÉXITO! Registro creado y alias guardado correctamente.");
+            return res.json({ success: true, message: 'Dispositivo registrado y renombrado' });
+        }
+    } catch (error) {
+        console.error('❌ ERROR CRÍTICO EN EL BACKEND:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ==========================================
 // INICIAR SERVIDOR CON CONEXIÓN ASÍNCRONA A LA DB
 // ==========================================
@@ -570,7 +688,7 @@ const PORT = 3000;
 app.use(express.static('public')); 
 
 // Sincronizamos las tablas y luego encendemos Express
-sequelize.sync({ force: false }) // 'force: false' asegura que tus datos no se borren al reiniciar el servidor
+sequelize.sync({ alter: true }) // 'force: false' asegura que tus datos no se borren al reiniciar el servidor
   .then(() => {
     console.log('💾 Base de datos SQLite sincronizada correctamente.');
     app.listen(PORT, () => console.log(`🚀 Servidor unificado listo en http://localhost:${PORT}`));
