@@ -16,17 +16,20 @@ const TaskButton = ({ icon: Icon, text, iconColor, onClick, disabled }) => (
   </button>
 );
 
-export default function DeviceCard({ id, udid, name, customName, isConnected = true, active, battery, action, status, onToggle, onSetAction, onExecute, onRefresh }) {
+// 🔥 CORRECCIÓN 1: Agregamos "connected" a las propiedades para que coincida con el servidor
+export default function DeviceCard({ id, udid, name, customName, connected, isConnected, active, battery, action, status, onToggle, onSetAction, onExecute, onRefresh }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState('');
   
-  // 🔥 ESTADOS PARA RENOMBRAR Y OPTIMISTIC UI
   const [isEditing, setIsEditing] = useState(false);
   const [newName, setNewName] = useState(customName || name);
   const [localName, setLocalName] = useState(customName || name);
 
-  // 🔥 Sincroniza el nombre local si llegan cambios del servidor
+  // 🔥 CORRECCIÓN 2: Unificamos la validación. Si el servidor manda "connected", lo usamos. 
+  // Si no, nos guiamos por el texto "Desconectado".
+  const isOnline = connected ?? isConnected ?? status !== "Desconectado";
+
   useEffect(() => {
     setLocalName(customName || name);
   }, [customName, name]);
@@ -42,19 +45,14 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
     if (onSetAction) onSetAction(taskName, url, comment);
   };
 
-// 🔥 FUNCIÓN MEJORADA PARA GUARDAR
   const handleRename = async () => {
     setIsEditing(false); 
-    
     if (newName === localName) return; 
 
     setLocalName(newName);
-
-    // 👇 Usamos udid o id, el que esté disponible
     const identificador = udid || id; 
 
     try {
-      // 👇 Inyectamos la variable "identificador" en la URL
       await axios.put(`http://localhost:3000/api/devices/${identificador}/rename`, {
         customName: newName
       });
@@ -68,23 +66,23 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
   const getStatusStyles = () => {
     if (status === "Ejecutando") return "bg-[#2563eb]/20 text-[#60a5fa] border border-[#2563eb]/40 animate-pulse";
     if (status === "Hecho!") return "bg-[#16a34a]/20 text-[#4ade80] border border-[#16a34a]/40";
+    if (!isOnline) return "bg-red-900/20 text-red-400 border border-red-900/40"; // Estilo rojo si está desconectado
     return "bg-[#1f2937] text-gray-300";
   };
 
   const isRunning = status === "Ejecutando";
-  const displayName = localName; // 🔥 AHORA USAMOS EL NOMBRE LOCAL
+  const displayName = localName; 
 
   return (
     <>
       <div className={`bg-[#12151c] border rounded-2xl w-full max-w-[350px] overflow-hidden transition-all duration-300 shadow-xl relative ${
-        isConnected ? 'border-[#1e293b]' : 'border-gray-800 opacity-60 grayscale'
+        isOnline ? 'border-[#1e293b]' : 'border-red-900/30 opacity-60 grayscale'
       }`}>
         <div className="p-5 pb-0">
           <div className="flex justify-between items-start mb-6">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 
-                {/* 🔥 Lógica condicional: Input vs Texto + Botón */}
                 {isEditing ? (
                   <input 
                     type="text" 
@@ -101,8 +99,7 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
                       {displayName}
                     </h3>
                     
-                    {/* 🔥 Nuevo botón de edición */}
-                    {isConnected && (
+                    {isOnline && (
                       <button 
                         onClick={() => {
                           setNewName(localName);
@@ -117,11 +114,11 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
                   </>
                 )}
 
-                <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? (active ? 'bg-green-500' : 'bg-gray-600') : 'bg-gray-700'}`}></div>
+                <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? (active ? 'bg-green-500' : 'bg-gray-600') : 'bg-red-600'}`}></div>
               </div>
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-gray-400 font-medium">{isConnected ? (active ? 'Activo' : 'Inactivo') : 'Desconectado'}</span>
-                {battery && isConnected ? (
+                <span className="text-gray-400 font-medium">{isOnline ? (active ? 'Activo' : 'Inactivo') : 'Desconectado'}</span>
+                {battery && isOnline ? (
                   <div className="flex items-center gap-1.5 text-green-500 font-medium">
                     <Battery size={16} />
                     <span className="text-gray-300">{battery}%</span>
@@ -134,8 +131,12 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
               </div>
             </div>
             
-            <div onClick={!isRunning && isConnected ? onToggle : null} className={`w-[48px] h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${active && isConnected ? 'bg-[#5e5c8a]' : 'bg-[#374151]'} ${isRunning || !isConnected ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
-              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${active && isConnected ? 'translate-x-6' : ''}`}></div>
+            {/* 🔥 CORRECCIÓN 3: El switch ahora evalúa isOnline. Si no está en línea, no hace nada al hacer click */}
+            <div 
+              onClick={!isRunning && isOnline ? onToggle : undefined} 
+              className={`w-[48px] h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${active && isOnline ? 'bg-[#5e5c8a]' : 'bg-[#374151]'} ${isRunning || !isOnline ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+            >
+              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${active && isOnline ? 'translate-x-6' : ''}`}></div>
             </div>
           </div>
         </div>
@@ -146,19 +147,19 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
             <h4 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Seleccione una tarea</h4>
             
             <div className="grid grid-cols-2 gap-3 mb-5">
-              <TaskButton icon={Heart} text="Reaccionar a un post" iconColor="text-red-400" onClick={() => handleOpenTask("Reaccionar a un post")} disabled={isRunning || !isConnected} />
-              <TaskButton icon={MessageCircle} text="Comentar en un post" iconColor="text-blue-400" onClick={() => handleOpenTask("Comentar en un post")} disabled={isRunning || !isConnected} />
-              <TaskButton icon={UserPlus} text="Seguir cuenta" iconColor="text-purple-400" onClick={() => handleOpenTask("Seguir cuenta")} disabled={isRunning || !isConnected} />
-              <TaskButton icon={Rss} text="Mirar transmisión" iconColor="text-yellow-400" onClick={() => handleOpenTask("Mirar transmisión")} disabled={isRunning || !isConnected} />
+              <TaskButton icon={Heart} text="Reaccionar a un post" iconColor="text-red-400" onClick={() => handleOpenTask("Reaccionar a un post")} disabled={isRunning || !isOnline} />
+              <TaskButton icon={MessageCircle} text="Comentar en un post" iconColor="text-blue-400" onClick={() => handleOpenTask("Comentar en un post")} disabled={isRunning || !isOnline} />
+              <TaskButton icon={UserPlus} text="Seguir cuenta" iconColor="text-purple-400" onClick={() => handleOpenTask("Seguir cuenta")} disabled={isRunning || !isOnline} />
+              <TaskButton icon={Rss} text="Mirar transmisión" iconColor="text-yellow-400" onClick={() => handleOpenTask("Mirar transmisión")} disabled={isRunning || !isOnline} />
             </div>
 
             <button 
               onClick={onExecute}
-              disabled={!action || isRunning || !active || !isConnected}
+              disabled={!action || isRunning || !active || !isOnline}
               className={`w-full flex items-center justify-center gap-2.5 font-semibold py-3.5 rounded-xl transition-colors mb-5 ${
                 isRunning 
                   ? 'bg-[#2563eb] text-white cursor-wait' 
-                  : action && active && isConnected
+                  : action && active && isOnline
                     ? 'bg-[#3b82f6] hover:bg-[#2563eb] text-white cursor-pointer shadow-lg shadow-blue-500/20' 
                     : 'bg-[#1a2233] text-gray-500 cursor-not-allowed'
               }`}
@@ -171,7 +172,7 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
               ) : (
                 <>
                   <Play size={18} />
-                  {action ? (active && isConnected ? 'Ejecutar tarea' : 'Active el dispositivo') : 'Configurar tarea primero'}
+                  {action ? (active && isOnline ? 'Ejecutar tarea' : 'Active el dispositivo') : 'Configurar tarea primero'}
                 </>
               )}
             </button>
@@ -185,7 +186,7 @@ export default function DeviceCard({ id, udid, name, customName, isConnected = t
             </span>
             {action && <span className="bg-[#3b82f6]/10 text-[#60a5fa] border border-[#3b82f6]/20 text-xs px-3.5 py-1.5 rounded-full font-semibold">{action}</span>}
           </div>
-          <button onClick={toggleExpand} disabled={!isConnected} className={`p-1 rounded-full transition-colors group ${!isConnected ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#1a2233]'}`}>
+          <button onClick={toggleExpand} disabled={!isOnline} className={`p-1 rounded-full transition-colors group ${!isOnline ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#1a2233]'}`}>
             <ChevronDown size={20} className={`text-gray-500 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-white' : 'group-hover:text-white'}`} />
           </button>
         </div>

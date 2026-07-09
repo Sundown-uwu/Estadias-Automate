@@ -17,6 +17,9 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "sequelize": "^6.37.8",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "socket.oi": "^0.0.1-security.8",
     "sqlite3": "^6.0.1",
     "webdriverio": "^9.27.2"
   },

@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { RefreshCw, Play, LayoutDashboard, List } from 'lucide-react';
+import { RefreshCw, Play, LayoutDashboard, List, Clock } from 'lucide-react';
 
 export default function Sidebar({ 
   devices = [], 
   isScanning = false, 
   onScan, 
   onGlobalExecute,
-  currentView,     // <-- RECUPERADO: Para saber en qué vista estamos
-  setCurrentView   // <-- RECUPERADO: Para cambiar de vista
+  currentView,     
+  setCurrentView   
 }) {
   
   // 📊 Cálculos en tiempo real
@@ -22,23 +22,39 @@ export default function Sidebar({
   const [inputValue, setInputValue] = useState(''); // Lo que el usuario está escribiendo
   const [globalDelay, setGlobalDelay] = useState('00:15'); // 15 segundos por defecto
 
-  // Función para capturar el "Enter" o la "Coma"
+  // Función para hacer capturar el "Enter" o la "Coma"
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       const newComment = inputValue.trim();
       
-      // Evitamos añadir etiquetas vacías o repetidas
       if (newComment && !globalComments.includes(newComment)) {
         setGlobalComments([...globalComments, newComment]);
       }
-      setInputValue(''); // Limpiamos el input para la siguiente frase
+      setInputValue(''); 
     }
   };
 
   // Función para eliminar un comentario al dar clic en la "X"
   const removeComment = (indexToRemove) => {
     setGlobalComments(globalComments.filter((_, index) => index !== indexToRemove));
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Formatea el tiempo a MM:SS automáticamente
+  const handleTimeChange = (e) => {
+    // 1. Capturamos el valor y eliminamos todo lo que NO sea un número
+    let rawValue = e.target.value.replace(/\D/g, '');
+
+    // 2. Limitamos a un máximo de 4 dígitos (MMSS)
+    rawValue = rawValue.slice(0, 4);
+
+    // 3. Si ya hay más de 2 dígitos, inyectamos los ':' en medio
+    if (rawValue.length > 2) {
+      rawValue = rawValue.slice(0, 2) + ':' + rawValue.slice(2);
+    }
+
+    // 4. Actualizamos el estado
+    setGlobalDelay(rawValue); 
   };
 
   const handleGlobalSubmit = () => {
@@ -49,10 +65,8 @@ export default function Sidebar({
       return alert("Por favor añade al menos un comentario a la lista.");
     }
 
-    // Le pasamos el ARREGLO de comentarios en lugar del string
     onGlobalExecute(globalTask, globalUrl, globalComments, globalDelay);
     
-    // Limpiamos los campos después de enviar
     setGlobalTask('');
     setGlobalUrl('');
     setGlobalComments([]);
@@ -67,7 +81,7 @@ export default function Sidebar({
           Dashboard de automatización<br />de interacciones
         </p>
 
-        {/* 🔥 NAVEGACIÓN RECUPERADA 🔥 */}
+        {/* 🔥 NAVEGACIÓN ACTUALIZADA CON COLA DE TAREAS 🔥 */}
         <div className="space-y-2 mb-8">
           <button 
             onClick={() => setCurrentView('dashboard')}
@@ -80,6 +94,7 @@ export default function Sidebar({
             <LayoutDashboard size={18} />
             Dispositivos
           </button>
+          
           <button 
             onClick={() => setCurrentView('historial')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
@@ -91,8 +106,21 @@ export default function Sidebar({
             <List size={18} />
             Historial de Tareas
           </button>
+
+          {/* 🔥 NUEVO BOTÓN: COLA DE TAREAS */}
+          <button 
+            onClick={() => setCurrentView('cola')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+              currentView === 'cola' 
+                ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20' 
+                : 'text-gray-400 hover:bg-[#1e293b] hover:text-white'
+            }`}
+          >
+            <Clock size={18} />
+            Cola de Tareas
+          </button>
         </div>
-        {/* =========================== */}
+        {/* =========================================== */}
 
         <h3 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Resumen</h3>
         <div className="space-y-4 text-base mb-8">
@@ -136,7 +164,7 @@ export default function Sidebar({
               onChange={(e) => setGlobalUrl(e.target.value)}
             />
 
-            {/* 🔥 NUEVO: Control de espera en formato MM:SS */}
+            {/* 🔥 CONTROL DE ESPERA ACTUALIZADO */}
             <div className="flex items-center justify-between bg-[#111827] border border-[#334155] rounded-lg px-3 py-2">
               <span className="text-sm text-gray-300">Espera (MM:SS):</span>
               <input 
@@ -145,11 +173,7 @@ export default function Sidebar({
                 maxLength={5}
                 className="w-16 bg-[#272727] text-center text-sm text-white rounded border border-[#3f3f3f] focus:outline-none focus:border-blue-500 tracking-widest"
                 value={globalDelay}
-                onChange={(e) => {
-                  // Filtramos para que solo acepte números y el símbolo ":"
-                  const valorLimpio = e.target.value.replace(/[^0-9:]/g, '');
-                  setGlobalDelay(valorLimpio);
-                }}
+                onChange={handleTimeChange} // <-- Inyectamos la magia aquí
               />
             </div>
 
@@ -158,7 +182,6 @@ export default function Sidebar({
                 <div 
                   className="w-full bg-[#111827] border border-[#334155] rounded-lg p-2 flex flex-wrap gap-2 focus-within:border-blue-500 transition-colors min-h-[80px] max-h-[150px] overflow-y-auto custom-scrollbar"
                 >
-                  {/* Aquí mapeamos y dibujamos cada etiqueta */}
                   {globalComments.map((comment, index) => (
                     <span 
                       key={index} 
@@ -175,7 +198,6 @@ export default function Sidebar({
                     </span>
                   ))}
                   
-                  {/* Input invisible que genera las etiquetas */}
                   <input 
                     type="text" 
                     value={inputValue}

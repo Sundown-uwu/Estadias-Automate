@@ -1,23 +1,41 @@
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
 const { remote } = require('webdriverio');
 const { exec } = require('child_process');
 const util = require('util');
-const path = require('path'); // Requerido para la ruta de la base de datos
-const { Sequelize, DataTypes } = require('sequelize'); // Importamos Sequelize
+const path = require('path');
+const { Sequelize, DataTypes, Op } = require('sequelize');
 const Dispositivo = require('./models/Dispositivo.cjs');
 const HistorialTarea = require('./models/HistorialTarea.cjs'); 
 
 const execPromise = util.promisify(exec);
-
 const app = express();
+
+// ==========================================
+//  1. CONFIGURACIÓN DE WEBSOCKETS 
+// ==========================================
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*", methods: ["GET", "POST", "PUT"]
+    }
+});
+
+io.on('connection', (socket) => {
+    console.log('🟢 Cliente React conectado al WebSocket:', socket.id);
+    socket.on('disconnect', () => {
+        console.log('🔴 Cliente desconectado:', socket.id);
+    });
+});
+
 app.use(cors());
 app.use(express.json());
 
 // ==========================================
 // 💾 CONFIGURACIÓN E INICIALIZACIÓN DE LA DB
 // ==========================================
-// Crea el archivo "autocontrol.sqlite" automáticamente en la raíz de tu proyecto backend
 const sequelize = require('./config/database.cjs');
 
 // ==========================================
@@ -74,7 +92,7 @@ async function scrollHaciaAbajo(driver) {
 }
 
 // ==========================================
-// SECCIÓN 1: AUTOMATIZACIÓN DE SEGUIR USUARIO (⚡ RÁPIDA)
+// SECCIÓN 1: AUTOMATIZACIÓN DE SEGUIR USUARIO
 // ==========================================
 async function seguirUsuarioInstagram(deviceId, deviceName, urlPerfil) {
     const urlLimpia = urlPerfil.split('?')[0]; 
@@ -145,7 +163,7 @@ async function seguirUsuarioInstagram(deviceId, deviceName, urlPerfil) {
 }
 
 // ==========================================
-// SECCIÓN 2: AUTOMATIZACIÓN DE LIKE (⚡ RÁPIDA)
+// SECCIÓN 2: AUTOMATIZACIÓN DE LIKE
 // ==========================================
 async function likearPostInstagram(deviceId, deviceName, urlPost) {
     const urlLimpia = urlPost.split('?')[0];
@@ -238,11 +256,11 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
 }
 
 // ==========================================
-// SECCIÓN 3: AUTOMATIZACIÓN DE COMENTARIOS (⚡ RÁPIDA)
+// SECCIÓN 3: AUTOMATIZACIÓN DE COMENTARIOS
 // ==========================================
 async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoComentario) {
     const urlLimpia = urlPost.split('?')[0];
-    console.log(`🔌 [${deviceId}] Conending a Appium para COMENTAR en: ${urlLimpia}`);
+    console.log(`🔌 [${deviceId}] Conectando a Appium para COMENTAR en: ${urlLimpia}`);
     
     const configDeSesion = obtenerConfiguracionDispositivo(deviceId, deviceName);
     const driver = await remote(configDeSesion);
@@ -360,11 +378,7 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
 }
 
 // ==========================================
-// SECCIÓN 4: ENDPOINTS DE LA API (Express)
-// ==========================================
-
-// ==========================================
-// FUNCIÓN AUXILIAR: Obtener dispositivos físicos y su batería
+// SECCIÓN 4: OBTENER DISPOSITIVOS FÍSICOS
 // ==========================================
 async function obtenerDispositivosDeAdb() {
   try {
@@ -374,195 +388,267 @@ async function obtenerDispositivosDeAdb() {
 
     for (let i = 1; i < lineas.length; i++) {
       const linea = lineas[i].trim();
-      
       if (linea && linea.endsWith('device')) {
         const udid = linea.split('\t')[0];
-        
         promesasDispositivos.push((async () => {
-          let nivelBateria = 100; // Default
-
+          let nivelBateria = 100;
           try {
             const { stdout: batteryStdout } = await execPromise(`adb -s ${udid} shell dumpsys battery`);
             const coincidencia = batteryStdout.match(/level:\s*(\d+)/);
-            if (coincidencia) {
-              nivelBateria = parseInt(coincidencia[1], 10);
-            }
-          } catch (batteryError) {
-            console.error(`⚠️ No se pudo leer batería de [${udid}]:`, batteryError.message);
-          }
-
-          // Retornamos el objeto básico para que la ruta de la DB lo procese
-          return {
-            udid: udid,
-            battery: nivelBateria
-          };
+            if (coincidencia) nivelBateria = parseInt(coincidencia[1], 10);
+          } catch (e) { }
+          return { udid: udid, battery: nivelBateria, name: `Android (${udid})` };
         })());
       }
     }
-    
-    // Esperamos a que terminen de leerse todas las baterías
     return await Promise.all(promesasDispositivos);
-
   } catch (error) {
-    console.error('⚠️ Error al buscar dispositivos en ADB:', error);
     return [];
   }
 }
 
-// Ruta optimizada para escanear celulares y extraer su batería real
+// 🔥 2. FUNCIÓN MAESTRA DE ESCANEO (Extraída para reusarla en el WebSocket)
+async function obtenerEstadoCompletoDispositivos() {
+    const dbDevices = await Dispositivo.findAll();
+    const conectadosFisicamente = await obtenerDispositivosDeAdb(); 
+
+    const tareasActivas = await HistorialTarea.findAll({
+        where: {status: { [Op.in]: ['En cola', 'Ejecutando'] }}
+    });
+
+    const dispositivosActualizados = [];
+
+    for (const fisic of conectadosFisicamente) {
+        const [dispositivoDb] = await Dispositivo.findOrCreate({
+            where: { udid: fisic.udid },
+            defaults: { name: fisic.name, customName: "" }
+        });
+
+        const tarea = tareasActivas.find(t => t.deviceId === fisic.udid);
+        const estadoReal = tarea ? tarea.status : "En espera";
+        const accionReal = tarea ? tarea.action : null;
+
+        dispositivosActualizados.push({
+            id: dispositivoDb.udid,
+            udid: dispositivoDb.udid,
+            name: dispositivoDb.customName || dispositivoDb.name,
+            customName: dispositivoDb.customName,
+            originalName: dispositivoDb.name,
+            connected: true,
+            active: true,
+            status: estadoReal,
+            action: accionReal,
+            url: tarea ? tarea.url : "",
+            comment: tarea ? tarea.comment : "",
+            battery: fisic.battery
+        });
+    }
+
+for (const dbDev of dbDevices) {
+        if (!conectadosFisicamente.some(f => f.udid === dbDev.udid)) {
+            const tarea = tareasActivas.find(t => t.deviceId === dbDev.udid);
+            dispositivosActualizados.push({
+                id: dbDev.udid, udid: dbDev.udid,
+                name: dbDev.customName || dbDev.name, customName: dbDev.customName, originalName: dbDev.name,
+                connected: false, active: false,
+                status: tarea ? tarea.status : "Desconectado", action: tarea ? tarea.action : null,
+                url: "", comment: "", battery: 0
+            });
+        }
+    }
+    return dispositivosActualizados;
+}
+
+// 🔥 3. CICLO EN SEGUNDO PLANO (LA MAGIA EN TIEMPO REAL)
+// Cada 5 segundos revisa ADB de manera invisible y le avisa a React si algo cambió
+setInterval(async () => {
+    try {
+        const devices = await obtenerEstadoCompletoDispositivos();
+        io.emit('dispositivos_actualizados', devices);
+    } catch (e) {}
+}, 5000); 
+
+const dispositivosOcupados = new Set(); // Memoria para saber quién está trabajando
+
+async function procesarCola() {
+    try {
+        // Buscamos las tareas que están en espera
+        const tareasPendientes = await HistorialTarea.findAll({
+            where: { status: 'En cola' },
+            order: [['createdAt', 'ASC']] // Las más viejas primero
+        });
+
+        if (tareasPendientes.length === 0) return; // Nada que hacer
+
+        for (const tarea of tareasPendientes) {
+            // Si el dispositivo ya está trabajando, saltamos esta tarea por ahora
+            if (dispositivosOcupados.has(tarea.deviceId)) continue;
+
+            // Bloqueamos el dispositivo
+            dispositivosOcupados.add(tarea.deviceId);
+            
+            // Actualizamos estado a "Ejecutando" y avisamos a React
+            await tarea.update({ status: 'Ejecutando', mensaje: 'Procesando en Appium...' });
+            io.emit('cola_actualizada');
+            io.emit('historial_actualizado');
+
+            // Mandamos a ejecutar sin detener el ciclo (sin await aquí)
+            ejecutarTarea(tarea).catch(console.error);
+        }
+    } catch (error) {
+        console.error("Error al procesar la cola:", error);
+    }
+}
+
+// ==========================================
+// 🔥 4. EL NUEVO GESTOR DE COLA SECUENCIAL (WORKER)
+// ==========================================
+let appiumOcupado = false; 
+let globalCooldownMs = 15000; // Por defecto 15 segs
+
+async function procesarCola() {
+    // Si Appium está trabajando o en sus 5 mins de descanso, el capataz no hace nada
+    if (appiumOcupado) return; 
+
+    try {
+        // Buscamos SOLO LA PRIMERA tarea de la fila
+        const tarea = await HistorialTarea.findOne({
+            where: { status: 'En cola' },
+            order: [['createdAt', 'ASC']] 
+        });
+
+        if (!tarea) {
+            globalCooldownMs = 15000;
+            return;
+        }
+
+        appiumOcupado = true; // 🔒 Cerramos la puerta para que ningún otro celular entre
+        
+        // Avisamos a React (para que la Cola y la Tarjeta cambien a Ejecutando)
+        await tarea.update({ status: 'Ejecutando', mensaje: 'Procesando en Appium...' });
+        io.emit('cola_actualizada');
+        io.emit('estado_dispositivo', { id: tarea.deviceId, status: 'Ejecutando...' });
+
+        // EJECUTAMOS LA AUTOMATIZACIÓN
+        let resultado = {mensaje: "Completado" };
+        let huboError = false;
+        try {
+            switch (tarea.action) {
+                case 'Seguir cuenta': resultado = await seguirUsuarioInstagram(tarea.deviceId, tarea.deviceName, tarea.url); break;
+                case 'Reaccionar a un post': resultado = await likearPostInstagram(tarea.deviceId, tarea.deviceName, tarea.url); break;
+                case 'Comentar en un post': resultado = await publicarComentarioInstagram(tarea.deviceId, tarea.deviceName, tarea.url, tarea.comment); break;
+                case 'Mirar transmisión': await new Promise(r => setTimeout(r, 5000)); break;
+            }
+            await tarea.update({ status: 'Éxito', mensaje: resultado.mensaje });
+        } catch (error) {
+            huboError = true;
+            await tarea.update({ status: 'Error', mensaje: error.message });
+        }
+
+        // Avisamos que terminó para cambiar la tarjeta a "Hecho!"
+        io.emit('estado_dispositivo', { id: tarea.deviceId, status: huboError ? 'Error' : 'Hecho!', action: null });
+        io.emit('cola_actualizada'); 
+        io.emit('historial_actualizado'); 
+
+        // ⏳ APLICAMOS TU DELAY DE 5 MINUTOS (O EL QUE PONGAS)
+        console.log(`\n⏱️ Tarea terminada. Esperando cooldown de ${globalCooldownMs / 1000} segundos antes de arrancar el siguiente...\n`);
+        
+        setTimeout(() => {
+            appiumOcupado = false; // 🔓 Abrimos la puerta de nuevo
+            procesarCola(); // Llamamos al capataz para que atienda al que sigue en la fila
+        }, globalCooldownMs);
+
+    } catch (error) {
+        console.error("Error crítico en el capataz:", error);
+        appiumOcupado = false;
+    }
+}
+
+// ==========================================
+// SECCIÓN 5: ENDPOINTS DE LA API (Express)
+// ==========================================
+
 app.get('/api/scan-devices', async (req, res) => {
     try {
-        const { stdout } = await execPromise('adb devices');
-        const lineas = stdout.trim().split('\n');
-        
-        const promesasDispositivos = [];
-
-        for (let i = 1; i < lineas.length; i++) {
-            const linea = lineas[i].trim();
-            
-            if (linea && linea.endsWith('device')) {
-                const udid = linea.split('\t')[0];
-                
-                promesasDispositivos.push((async () => {
-                    let nivelBateria = 100;
-
-                    try {
-                        const { stdout: batteryStdout } = await execPromise(`adb -s ${udid} shell dumpsys battery`);
-                        
-                        const coincidencia = batteryStdout.match(/level:\s*(\d+)/);
-                        if (coincidencia) {
-                            nivelBateria = parseInt(coincidencia[1], 10);
-                        }
-                    } catch (batteryError) {
-                        console.error(`⚠️ No se pudo leer la batería del dispositivo [${udid}]:`, batteryError.message);
-                    }
-
-                    return {
-                        id: udid,
-                        name: `Android (${udid})`,
-                        udid: udid,
-                        active: true,
-                        status: "En espera",
-                        action: null,
-                        url: "",
-                        comment: "",
-                        battery: nivelBateria 
-                    };
-                })());
-            }
-        }
-
-        const dispositivosDetectados = await Promise.all(promesasDispositivos);
-
-        console.log(`📡 Escaneo completo: ${dispositivosDetectados.length} dispositivo(s) con batería real.`);
-        res.status(200).json({ success: true, devices: dispositivosDetectados });
-
+        const devices = await obtenerEstadoCompletoDispositivos();
+        res.status(200).json({ success: true, devices });
     } catch (error) {
-        console.error(`❌ Error crítico en el escaneo ADB: ${error.message}`);
-        return res.status(500).json({ success: false, error: "Fallo al procesar el escaneo de dispositivos." });
+        res.status(500).json({ success: false, error: "Fallo al procesar el escaneo." });
     }
 });
 
-// ==========================================
-// ENDPOINT MAESTRO DINÁMICO ACTUALIZADO CON DB
-// ==========================================
 app.post('/api/execute-task', async (req, res) => {
-    const { deviceId, deviceName, action, url, comment } = req.body;
-
-    // 1. Creamos una variable para guardar el comentario final que usaremos
+    const { deviceId, deviceName, action, url, comment, delayMs } = req.body;
+    
     let comentarioFinal = "";
-
-    // 2. Verificamos si lo que llegó es una lista (arreglo) y tiene elementos
-    if (Array.isArray(comment)) {
-        if (comment.length >0) {
-        const indiceAleatorio = Math.floor(Math.random() * comment.length);
-        comentarioFinal = comment[indiceAleatorio];
-        }
-    }else if(comment) {
+    if (Array.isArray(comment) && comment.length > 0) {
+        comentarioFinal = comment[Math.floor(Math.random() * comment.length)];
+    } else if (typeof comment === 'string') {
         comentarioFinal = comment;
     }
-
-    console.log(`\n=================================================`);
-    console.log(`🤖 ORDEN RECIBIDA DESDE LA INTERFAZ WEB`);
-    console.log(`📱 Dispositivo UDID: ${deviceId}`);
-    console.log(`🎬 Acción requerida: "${action}"`);
-    console.log(`🔗 URL objetivo: ${url}`);
-    if (comentarioFinal) console.log(`💬 Comentario: "${comentarioFinal}"`);
-    console.log(`=================================================\n`);
+    
+    if (delayMs !== undefined) {
+        globalCooldownMs = delayMs;
+    } else {
+        globalCooldownMs = 15000;
+    }
 
     try {
-        let resultado;
-
-        switch (action) {
-            case 'Seguir cuenta':
-                resultado = await seguirUsuarioInstagram(deviceId, deviceName, url);
-                break;
-                
-            case 'Reaccionar a un post':
-                resultado = await likearPostInstagram(deviceId, deviceName, url);
-                break;
-                
-            case 'Comentar en un post':
-                const textoFinal = comentarioFinal || "¡Excelente contenido! 🔥";
-                resultado = await publicarComentarioInstagram(deviceId, deviceName, url, textoFinal);
-                break;
-
-            case 'Mirar transmisión':
-                console.log("⏳ Simulando mirar transmisión por 5 segundos...");
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                resultado = { success: true, mensaje: "Simulación de transmisión finalizada." };
-                break;
-
-            default:
-                return res.status(400).json({ success: false, message: "❌ Acción no reconocida por el servidor." });
-        }
-
-        // 🔥 REGISTRO EN LA BASE DE DATOS (ÉXITO O ADVERTENCIA)
-        await HistorialTarea.create({
-            deviceId,
-            deviceName,
-            action,
-            url,
-            comment: comentarioFinal,
-            status: resultado.success ? 'Éxito' : 'Fallido',
-            mensaje: resultado.mensaje
+        await HistorialTarea.create({ 
+            deviceId, 
+            deviceName, 
+            action, 
+            url, 
+            comment: comentarioFinal, 
+            status: 'En cola', 
+            mensaje: 'Esperando turno en la cola...' 
         });
+        
+        io.emit('cola_actualizada'); 
+        procesarCola(); 
 
-        res.status(200).json({ 
-            success: true, 
-            message: resultado.mensaje 
-        });
-
+        res.status(200).json({ success: true, message: "En cola" });
     } catch (error) {
-        console.error("❌ Error catastrófico en la automatización:", error.message);
-
-        // ❌ REGISTRO EN LA BASE DE DATOS (ERROR / CRASH DE APPIUM)
-        await HistorialTarea.create({
-            deviceId,
-            deviceName,
-            action,
-            url,
-            comment: comentarioFinal,
-            status: 'Error',
-            mensaje: error.message
-        });
-
-        res.status(500).json({ 
-            success: false, 
-            message: "Error interno en Appium: " + error.message 
-        });
+        console.error("❌ Error CRÍTICO al guardar en BD:", error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// ==========================================
-// 🚀 NUEVO ENDPOINT: CONSULTAR HISTORIAL DESDE REACT
-// ==========================================
+app.get('/api/queue', async (req, res) => {
+    try {
+        const cola = await HistorialTarea.findAll({ 
+            where: { status: { [Op.in]: ['En cola', 'Ejecutando'] } }, order: [['createdAt', 'ASC']] 
+        });
+        res.status(200).json({ success: true, queue: cola });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// 🔥 NUEVO ENDPOINT: Cancelar/Eliminar una tarea de la cola
+app.put('/api/queue/cancel/:id', async (req, res) => {
+    try {
+        const tarea = await HistorialTarea.findByPk(req.params.id);
+        if (tarea && tarea.status === 'En cola') {
+            await tarea.update({ status: 'Cancelado', mensaje: 'Cancelado manualmente.' });
+            io.emit('cola_actualizada'); io.emit('historial_actualizado');
+            res.json({ success: true });
+        } else { res.status(400).json({ success: false }); }
+    } catch (error) { res.status(500).json({ success: false }); }
+});
+
+
+// EL ENDPOINT DE HISTORIAL AHORA FILTRA LO TERMINADO
 app.get('/api/history', async (req, res) => {
     try {
-        // Trae todos los logs ordenados por fecha de creación (los más nuevos primero)
-        const historial = await HistorialTarea.findAll({
-            order: [['createdAt', 'DESC']]
+        const historial = await HistorialTarea.findAll({ 
+            where: { status: { [Op.in]: ['Éxito', 'Fallido', 'Error', 'Cancelado'] } }, order: [['createdAt', 'DESC']] 
         });
+        res.status(200).json({ success: true, history: historial });
+    } catch (error) { res.status(500).json({ success: false }); }
+});
+
+app.get('/api/history', async (req, res) => {
+    try {
+        const historial = await HistorialTarea.findAll({ order: [['createdAt', 'DESC']] });
         res.status(200).json({ success: true, history: historial });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -571,127 +657,48 @@ app.get('/api/history', async (req, res) => {
 
 app.get('/api/devices', async (req, res) => {
     try {
-        // 1. Obtener todos los celulares guardados en la Base de Datos SQLite
-        const dbDevices = await Dispositivo.findAll();
-
-        // 2. Hacer el escaneo físico actual (obtiene udid y battery mediante promesas de ADB)
-        const conectadosFisicamente = await obtenerDispositivosDeAdb(); 
-
-        // 3. Cruzar los datos para saber cuáles están online, inyectar batería y registrar nuevos
-        const dispositivosActualizados = [];
-
-        // Primero, procesamos los que están físicamente conectados ahora mismo
-        for (const fisic of conectadosFisicamente) {
-            // Si es nuevo, lo guardamos. Si ya existe, mantiene sus datos intactos.
-            // Nota: Aquí pasamos el name genérico de ADB por si es la primera vez que se registra
-            const [dispositivoDb] = await Dispositivo.findOrCreate({
-                where: { udid: fisic.udid },
-                defaults: { name: fisic.name || `Android (${fisic.udid})`, customName: "" }
-            });
-
-            dispositivosActualizados.push({
-                id: dispositivoDb.udid,
-                udid: dispositivoDb.udid,
-                name: dispositivoDb.customName || dispositivoDb.name, // Si tiene alias (customName), usa el alias
-                customName: dispositivoDb.customName,
-                originalName: dispositivoDb.name,
-                connected: true,      // Para tu lógica de control interna
-                active: true,         // 🔥 Esto le dice al Switch de React que se renderice ACTIVADO por defecto
-                status: "En espera",  // Estado para dispositivos conectados
-                action: null,
-                url: "",
-                comment: "",
-                battery: fisic.battery // 🔋 Aquí inyectamos el nivel real que vino desde ADB
-            });
-        }
-
-        // Ahora, buscamos los que están en la DB pero NO se detectaron físicamente (Offline)
-        for (const dbDev of dbDevices) {
-            const estaConectado = conectadosFisicamente.some(f => f.udid === dbDev.udid);
-            
-            if (!estaConectado) {
-                dispositivosActualizados.push({
-                    id: dbDev.udid,
-                    udid: dbDev.udid,
-                    name: dbDev.customName || dbDev.name,
-                    customName: dbDev.customName,
-                    originalName: dbDev.name,
-                    connected: false,     // Desconectado físicamente
-                    active: false,        // 🔥 Esto le dice al Switch de React que se ponga INACTIVO por defecto
-                    status: "Desconectado", // Esto le dirá a React que pinte la tarjeta en gris
-                    action: null,
-                    url: "",
-                    comment: "",
-                    battery: 0            // Si está desconectado, marcamos 0 en la batería
-                });
-            }
-        }
-
-        // Devolvemos la respuesta unificada a React
-        // Nota: Asegúrate de revisar si tu Frontend espera recibir el array directo o dentro de un objeto:
-        // Si tu frontend usaba res.data directamente como array, usa: res.json(dispositivosActualizados);
-        // Si usaba res.data.devices, deja esta línea intacta:
+        const dispositivosActualizados = await obtenerEstadoCompletoDispositivos();
         res.json({ success: true, devices: dispositivosActualizados });
     } catch (error) {
-        console.error("❌ Error en la API /api/devices unificada:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// ==========================================
-// RUTA PARA RENOMBRAR DISPOSITIVOS (CON DIAGNÓSTICO)
-// ==========================================
 app.put('/api/devices/:udid/rename', async (req, res) => {
-    console.log("\n====== 🟡 INTENTO DE RENOMBRAR DISPOSITIVO ======");
-    console.log("➡️ UDID recibido del cliente:", req.params.udid);
-    console.log("➡️ Nuevo nombre (customName) recibido:", req.body.customName);
+    const { udid } = req.params;
+    const { customName } = req.body;
 
     try {
-        const { udid } = req.params;
-        const { customName } = req.body;
-
-        // Intentamos buscar el dispositivo en SQLite
         const dispositivo = await Dispositivo.findOne({ where: { udid: udid } });
-
         if (dispositivo) {
-            console.log("✨ Dispositivo encontrado en la base de datos vieja:", dispositivo.name);
-            
-            // Actualizamos y guardamos
             dispositivo.customName = customName;
             await dispositivo.save();
-            
-            console.log("✅ ¡ÉXITO! Guardado correctamente en la base de datos SQLite.");
-            return res.json({ success: true, message: 'Nombre actualizado correctamente' });
         } else {
-            // 🔥 HIPÓTESIS: A veces el dispositivo está conectado pero aún no existe un registro en la BD
-            console.log("❓ El dispositivo no existía en la BD. Creando un registro nuevo...");
-            
-            await Dispositivo.create({
-                udid: udid,
-                name: udid, // Usamos el udid temporalmente como nombre base
-                customName: customName
-            });
-
-            console.log("✅ ¡ÉXITO! Registro creado y alias guardado correctamente.");
-            return res.json({ success: true, message: 'Dispositivo registrado y renombrado' });
+            await Dispositivo.create({ udid: udid, name: udid, customName: customName });
         }
+        
+        // 🔥 AL RENOMBRAR, REESCANEA Y AVISA A TODOS LOS CLIENTES DE INMEDIATO
+        const devices = await obtenerEstadoCompletoDispositivos();
+        io.emit('dispositivos_actualizados', devices);
+        
+        return res.json({ success: true, message: 'Nombre actualizado correctamente' });
     } catch (error) {
-        console.error('❌ ERROR CRÍTICO EN EL BACKEND:', error);
         return res.status(500).json({ success: false, error: error.message });
     }
 });
 
 // ==========================================
-// INICIAR SERVIDOR CON CONEXIÓN ASÍNCRONA A LA DB
+// INICIAR SERVIDOR HTTP (EN VEZ DE EXPRESS DIRECTO)
 // ==========================================
 const PORT = 3000;
 app.use(express.static('public')); 
 
-// Sincronizamos las tablas y luego encendemos Express
-sequelize.sync({ alter: true }) // 'force: false' asegura que tus datos no se borren al reiniciar el servidor
+sequelize.sync({ alter: true }) 
   .then(() => {
     console.log('💾 Base de datos SQLite sincronizada correctamente.');
-    app.listen(PORT, () => console.log(`🚀 Servidor unificado listo en http://localhost:${PORT}`));
+    server.listen(PORT, () => console.log(`Servidor HTTP/WebSocket listo en http://localhost:${PORT}`));
+    //Se procesa la cola para ver si hay tareas pendientes (Por si se va la luz)
+    procesarCola(); 
   })
   .catch(err => {
     console.error('❌ Error crítico al inicializar la Base de Datos:', err);

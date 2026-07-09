@@ -28,7 +28,7 @@ const HistorialTarea = sequelize.define('HistorialTarea', {
     allowNull: true
   },
   status: {
-    type: DataTypes.STRING, // 'Éxito', 'Fallido', 'Error'
+    type: DataTypes.STRING, // 'En cola', 'Ejecutando', 'Éxito', 'Error', 'Cancelado'
     allowNull: false
   },
   mensaje: {
