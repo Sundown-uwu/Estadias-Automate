@@ -13,6 +13,24 @@ const HistorialTarea = require('./models/HistorialTarea.cjs');
 const execPromise = util.promisify(exec);
 const app = express();
 
+// ========================================
+// Appium corre automáticamente en el puerto 4723, no es necesario iniciar otro servidor Appium.
+// ========================================
+
+const { spawn } = require('child_process');
+
+// Iniciar Appium automáticamente al arrancar el servidor
+const appiumCmd = process.platform === 'win32' ? 'appium.cmd' : 'appium';
+const appiumProcess = spawn(appiumCmd, [], { shell: true });
+
+appiumProcess.stdout.on('data', (data) => {
+    console.log(`[Appium]: ${data}`);
+});
+
+appiumProcess.stderr.on('data', (data) => {
+    console.error(`[Appium Error]: ${data}`);
+});
+
 // ==========================================
 //  1. CONFIGURACIÓN DE WEBSOCKETS 
 // ==========================================
@@ -24,9 +42,9 @@ const io = new Server(server, {
 });
 
 io.on('connection', (socket) => {
-    console.log('🟢 Cliente React conectado al WebSocket:', socket.id);
+    console.log('Cliente React conectado al WebSocket:', socket.id);
     socket.on('disconnect', () => {
-        console.log('🔴 Cliente desconectado:', socket.id);
+        console.log('Cliente desconectado:', socket.id);
     });
 });
 
@@ -34,7 +52,7 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// 💾 CONFIGURACIÓN E INICIALIZACIÓN DE LA DB
+// CONFIGURACIÓN E INICIALIZACIÓN DE LA DB
 // ==========================================
 const sequelize = require('./config/database.cjs');
 
@@ -59,7 +77,10 @@ function obtenerConfiguracionDispositivo(deviceId, deviceName) {
             'appium:ensureWebviewsHavePages': true,
             'appium:nativeWebScreenshot': true,
             'appium:newCommandTimeout': 3600,
-            'appium:connectHardwareKeyboard': true
+            'appium:connectHardwareKeyboard': true,
+            'appium:ignoreUnimportantViews': false,
+            'appium:disableWindowAnimation': true,  // Desactiva transiciones para evitar lecturas de pantalla corruptas
+            'appium:skipServerInstallation': true
         }
     };
 }
@@ -68,7 +89,7 @@ function obtenerConfiguracionDispositivo(deviceId, deviceName) {
 // FUNCIÓN DE SCROLL (W3C Actions)
 // ==========================================
 async function scrollHaciaAbajo(driver) {
-    console.log('👇 Ejecutando downscroll para revelar elementos ocultos...');
+    console.log('Ejecutando downscroll para revelar elementos ocultos...');
     const windowSize = await driver.getWindowRect();
     const centroX = Math.floor(windowSize.width / 2);
     const startY = Math.floor(windowSize.height * 0.7);
@@ -88,7 +109,7 @@ async function scrollHaciaAbajo(driver) {
     }]);
 
     await driver.pause(1500); 
-    console.log('✅ Scroll completado.');
+    console.log('Scroll completado.');
 }
 
 // ==========================================
@@ -96,29 +117,33 @@ async function scrollHaciaAbajo(driver) {
 // ==========================================
 async function seguirUsuarioInstagram(deviceId, deviceName, urlPerfil) {
     const urlLimpia = urlPerfil.split('?')[0]; 
-    console.log(`🔌 [${deviceId}] Conectando a Appium para SEGUIR a: ${urlLimpia}`);
+    console.log(`[${deviceId}] Conectando a Appium para SEGUIR a: ${urlLimpia}`);
     
     const configDeSesion = obtenerConfiguracionDispositivo(deviceId, deviceName);
     const driver = await remote(configDeSesion);
 
     try {
-        console.log('📱 Paso 1: "Calentando" Instagram...');
+        console.log('Paso 1: "Calentando" Instagram...');
         await driver.activateApp('com.instagram.android');
         await driver.pause(2000); 
 
-        console.log('🚀 Paso 2: Abriendo el link DIRECTAMENTE en la app de Instagram...');
+        console.log('Paso 2: Abriendo el link DIRECTAMENTE en la app de Instagram...');
         await driver.execute('mobile: deepLink', { url: urlLimpia, package: 'com.instagram.android' });
-        await driver.pause(6000); 
+        // Estabilización para Android 15 / Vivo
+        await driver.pause(7000); 
 
-        console.log('👤 Paso 3: Escaneando botón de Seguir con Red de Seguridad...');
+        console.log('Paso 3: Escaneando botón de Seguir con Red de Seguridad...');
         let botonSeguir = null;
         let estadoActual = "";
         let viaLocalizacion = "";
 
+        // CAMBIO CLAVE: Cambiado a ID simple directo para evitar crasheos por UiSelector en Android 15
+        const selIdPerfil = 'id=com.instagram.android:id/profile_header_actions_button_text_view';
+
         for (let intento = 1; intento <= 15; intento++) {
-            console.log(`🔍 Escaneando perfil... Intento ${intento}/15`);
+            console.log(`Escaneando perfil... Intento ${intento}/15`);
             
-            const btnPorId = await driver.$('android=new UiSelector().resourceId("com.instagram.android:id/profile_header_actions_button_text_view")');
+            const btnPorId = await driver.$(selIdPerfil);
             const btnPorTexto = await driver.$('android=new UiSelector().text("Seguir")');
             const btnPorTextoTambien = await driver.$('android=new UiSelector().text("Seguir también")');
             const btnPorDesc = await driver.$('android=new UiSelector().descriptionContains("Seguir a")');
@@ -142,18 +167,18 @@ async function seguirUsuarioInstagram(deviceId, deviceName, urlPerfil) {
         }
 
         if (botonSeguir) {
-            console.log(`📸 Botón localizado vía: [${viaLocalizacion}]. Estado detectado: "${estadoActual}"`);
+            console.log(`Botón localizado vía: [${viaLocalizacion}]. Estado detectado: "${estadoActual}"`);
             if (estadoActual === "Seguir" || estadoActual === "Seguir también") {
                 await botonSeguir.click();
                 await driver.pause(3000);
                 return { success: true, mensaje: `¡Clic ejecutado con éxito en el botón! Localizado por: ${viaLocalizacion}` };
             } else if (estadoActual === "Siguiendo" || estadoActual === "Solicitado") {
-                return { success: true, mensaje: `✅ Misión omitida: La cuenta ya se encuentra en estado "${estadoActual}".` };
+                return { success: true, mensaje: `Misión omitida: La cuenta ya se encuentra en estado "${estadoActual}".` };
             } else {
-                return { success: false, mensaje: `⚠️ El botón arrojó un texto inesperado: "${estadoActual}".` };
+                return { success: false, mensaje: `El botón arrojó un texto inesperado: "${estadoActual}".` };
             }
         } else {
-            return { success: false, mensaje: '❌ No se logró encontrar el botón de Seguir.' };
+            return { success: false, mensaje: 'No se logró encontrar el botón de Seguir.' };
         }
     } catch (error) { 
         throw new Error(error.message); 
@@ -167,24 +192,26 @@ async function seguirUsuarioInstagram(deviceId, deviceName, urlPerfil) {
 // ==========================================
 async function likearPostInstagram(deviceId, deviceName, urlPost) {
     const urlLimpia = urlPost.split('?')[0];
-    console.log(`🔌 [${deviceId}] Conectando a Appium para dar like a: ${urlLimpia}`);
+    console.log(`[${deviceId}] Conectando a Appium para dar like a: ${urlLimpia}`);
     
     const configDeSesion = obtenerConfiguracionDispositivo(deviceId, deviceName);
     const driver = await remote(configDeSesion);
 
     try {
-        console.log('📱 Paso 1: "Calentando" Instagram...');
+        console.log(' Paso 1: "Calentando" Instagram...');
         await driver.activateApp('com.instagram.android');
         await driver.pause(2000); 
 
-        console.log('🚀 Paso 2: Abriendo el link DIRECTAMENTE en la app de Instagram...');
+        console.log('Paso 2: Abriendo el link DIRECTAMENTE en la app de Instagram...');
         await driver.execute('mobile: deepLink', { url: urlLimpia, package: 'com.instagram.android' });
-        await driver.pause(6000); 
-
-        console.log('❤️ Paso 3: Buscando el botón Like (Flujo: Post -> Reel -> Fallback)...');
         
-        const selLikeNormal = 'android=new UiSelector().resourceId("com.instagram.android:id/row_feed_button_like")';
-        const selLikeReel = 'android=new UiSelector().resourceId("com.instagram.android:id/like_button")';
+        await new Promise(resolve => setTimeout(resolve, 4000));
+
+        console.log(' Paso 3: Buscando el botón Like (Flujo: Post -> Reel -> Fallback)...');
+        
+        // Selector por ID directo (Evita crasheos de UIAutomator en Vivo)
+        const selLikeNormal = 'id=com.instagram.android:id/row_feed_button_like';
+        const selLikeReel = 'id=com.instagram.android:id/like_button';
         
         let botonALikear = null;
         let btnNormal = await driver.$(selLikeNormal);
@@ -192,13 +219,14 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
 
         if (await btnNormal.isExisting()) {
             botonALikear = btnNormal;
-            console.log('✅ Botón de Like (Post Normal) encontrado.');
+            console.log('Botón de Like (Post Normal) encontrado.');
         } else if (await btnReel.isExisting()) {
             botonALikear = btnReel;
-            console.log('✅ Botón de Like (Reel) encontrado.');
+            console.log('Botón de Like (Reel) encontrado.');
         } else {
-            console.log('⚠️ No se encontró el botón de Like de primera instancia. Probando con Downscroll...');
+            console.log('No se encontró el botón de Like de primera instancia. Probando con Downscroll...');
             await scrollHaciaAbajo(driver);
+            await driver.pause(1500); 
             
             btnNormal = await driver.$(selLikeNormal);
             btnReel = await driver.$(selLikeReel);
@@ -210,17 +238,17 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
         if (botonALikear) {
             const description = await botonALikear.getAttribute('content-desc');
             if (description === "Ya no me gusta") {
-                return { success: true, mensaje: `✅ El post/reel ya tenía tu "Me gusta". Misión cumplida.` };
+                return { success: true, mensaje: `El post/reel ya tenía tu "Me gusta". Misión cumplida.` };
             } else {
                 await botonALikear.click();
                 await driver.pause(2000);
                 return { success: true, mensaje: `¡Like dado con éxito al post/reel!` };
             }
         } else {
-            console.log('⚠️ Botón de Like no encontrado ni con scroll. ACTIVANDO PLAN B: Doble Tap ✌️');
+            console.log('Botón de Like no encontrado ni con scroll. ACTIVANDO PLAN B: Doble Tap ✌️');
             
             let centroX, centroY;
-            const contenedorPost = await driver.$('android=new UiSelector().resourceId("com.instagram.android:id/zoomable_view_container")');
+            const contenedorPost = await driver.$('id=com.instagram.android:id/zoomable_view_container');
             
             if (await contenedorPost.isExisting()) {
                 const loc = await contenedorPost.getLocation();
@@ -233,7 +261,7 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
                 centroY = Math.floor(windowSize.height / 2);
             }
 
-            console.log(`👆 Ejecutando ráfaga de doble toque en coordenadas: X=${centroX}, Y=${centroY}`);
+            console.log(`Ejecutando ráfaga de doble toque en coordenadas: X=${centroX}, Y=${centroY}`);
             await driver.performActions([{
                 type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' },
                 actions: [
@@ -245,7 +273,7 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
             }]);
 
             await driver.pause(2500); 
-            return { success: true, mensaje: '✅ ¡Like de Emergencia (Plan B) ejecutado con éxito vía Doble Tap!' };
+            return { success: true, mensaje: '¡Like de Emergencia (Plan B) ejecutado con éxito vía Doble Tap!' };
         }
 
     } catch (error) {
@@ -260,23 +288,25 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
 // ==========================================
 async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoComentario) {
     const urlLimpia = urlPost.split('?')[0];
-    console.log(`🔌 [${deviceId}] Conectando a Appium para COMENTAR en: ${urlLimpia}`);
+    console.log(`[${deviceId}] Conectando a Appium para COMENTAR en: ${urlLimpia}`);
     
     const configDeSesion = obtenerConfiguracionDispositivo(deviceId, deviceName);
     const driver = await remote(configDeSesion);
 
     try {
-        console.log('📱 Paso 1: "Calentando" Instagram...');
+        console.log('Paso 1: "Calentando" Instagram...');
         await driver.activateApp('com.instagram.android');
         await driver.pause(2000); 
 
-        console.log('🚀 Paso 2: Abriendo link DIRECTAMENTE en la app de Instagram...');
+        console.log('Paso 2: Abriendo link DIRECTAMENTE en la app de Instagram...');
         await driver.execute('mobile: deepLink', { url: urlLimpia, package: 'com.instagram.android' });
-        await driver.pause(6000); 
+        // Estabilización para Android 15 / Vivo
+        await driver.pause(7000); 
 
-        console.log('💬 Paso 3: Buscando el botón de comentarios...');
-        const selComentarioNormal = 'android=new UiSelector().resourceId("com.instagram.android:id/row_feed_button_comment")';
-        const selComentarioReel = 'android=new UiSelector().resourceId("com.instagram.android:id/comment_button")';
+        console.log('Paso 3: Buscando el botón de comentarios...');
+        // CAMBIO CLAVE: Optimizados selectores a ID nativo directo (No UiSelector masivo)
+        const selComentarioNormal = 'id=com.instagram.android:id/row_feed_button_comment';
+        const selComentarioReel = 'id=com.instagram.android:id/comment_button';
 
         let botonComentario = null;
         let btnNormal = await driver.$(selComentarioNormal);
@@ -284,12 +314,12 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
 
         if (await btnNormal.isExisting()) {
             botonComentario = btnNormal;
-            console.log('✅ Botón de comentario (Post Normal) encontrado.');
+            console.log('Botón de comentario (Post Normal) encontrado.');
         } else if (await btnReel.isExisting()) {
             botonComentario = btnReel;
-            console.log('✅ Botón de comentario (Reel) encontrado.');
+            console.log('Botón de comentario (Reel) encontrado.');
         } else {
-            console.log('⚠️ El botón de comentarios no está visible en pantalla. Ejecutando downscroll...');
+            console.log('El botón de comentarios no está visible en pantalla. Ejecutando downscroll...');
             await scrollHaciaAbajo(driver);
             
             btnNormal = await driver.$(selComentarioNormal);
@@ -303,13 +333,13 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
         }
         
         if (botonComentario) {
-            console.log('📍 Calculando el centro exacto del botón de comentarios...');
+            console.log('Calculando el centro exacto del botón de comentarios...');
             const loc = await botonComentario.getLocation();
             const size = await botonComentario.getSize();
             const centroX = Math.floor(loc.x + (size.width / 2));
             const centroY = Math.floor(loc.y + (size.height / 2));
             
-            console.log(`👆 Lanzando TAP físico directamente en su centro: X=${centroX}, Y=${centroY}`);
+            console.log(`Lanzando TAP físico directamente en su centro: X=${centroX}, Y=${centroY}`);
             await driver.performActions([{
                 type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' },
                 actions: [
@@ -324,12 +354,13 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
             throw new Error("El botón para abrir los comentarios no está visible.");
         }
 
-        console.log('📶 Paso 4: Calculando coordenadas exactas de la caja...');
+        console.log('Paso 4: Calculando coordenadas exactas de la caja...');
         let elementoCaja = null;
+        // CAMBIO CLAVE: Prioridad a IDs puros y fijos en lugar de búsquedas por expresiones regulares pesadas
         const selectoresCajaExactos = [
-            'android=new UiSelector().resourceId("com.instagram.android:id/layout_comment_thread_edittext_multiline")',
-            'android=new UiSelector().className("android.widget.AutoCompleteTextView").resourceIdMatches(".*edittext.*")',
-            'android=new UiSelector().resourceId("com.instagram.android:id/layout_comment_thread_edittext")'
+            'id=com.instagram.android:id/layout_comment_thread_edittext_multiline',
+            'id=com.instagram.android:id/layout_comment_thread_edittext',
+            'android=new UiSelector().className("android.widget.AutoCompleteTextView").resourceIdMatches(".*edittext.*")'
         ];
 
         for (const sel of selectoresCajaExactos) {
@@ -337,7 +368,7 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
                 const el = await driver.$(sel);
                 if (await el.isExisting()) {
                     elementoCaja = el;
-                    console.log(`🎯 Elemento de texto localizado con éxito.`);
+                    console.log(`Elemento de texto localizado con éxito.`);
                     break;
                 }
             } catch (e) { }
@@ -349,7 +380,7 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
             
             try {
                 await elementoCaja.setValue(textoComentario);
-                console.log('✅ Texto insertado con éxito.');
+                console.log('Texto insertado con éxito.');
             } catch (errInyeccion) {
                 await elementoCaja.addValue(textoComentario);
             }
@@ -359,10 +390,10 @@ async function publicarComentarioInstagram(deviceId, deviceName, urlPost, textoC
 
         await driver.pause(2000);
 
-        console.log('🚀 Paso 5: Buscando el botón Publicar...');
+        console.log('Paso 5: Buscando el botón Publicar...');
         try {
             await driver.execute('mobile: performEditorAction', { action: 'send' });
-            console.log('✅ Acción IME "Send" enviada.');
+            console.log('Acción IME "Send" enviada.');
         } catch (e) {
             await driver.pressKeyCode(66); 
         }
@@ -407,7 +438,7 @@ async function obtenerDispositivosDeAdb() {
   }
 }
 
-// 🔥 2. FUNCIÓN MAESTRA DE ESCANEO (Extraída para reusarla en el WebSocket)
+// FUNCIÓN MAESTRA DE ESCANEO
 async function obtenerEstadoCompletoDispositivos() {
     const dbDevices = await Dispositivo.findAll();
     const conectadosFisicamente = await obtenerDispositivosDeAdb(); 
@@ -444,7 +475,7 @@ async function obtenerEstadoCompletoDispositivos() {
         });
     }
 
-for (const dbDev of dbDevices) {
+    for (const dbDev of dbDevices) {
         if (!conectadosFisicamente.some(f => f.udid === dbDev.udid)) {
             const tarea = tareasActivas.find(t => t.deviceId === dbDev.udid);
             dispositivosActualizados.push({
@@ -459,8 +490,7 @@ for (const dbDev of dbDevices) {
     return dispositivosActualizados;
 }
 
-// 🔥 3. CICLO EN SEGUNDO PLANO (LA MAGIA EN TIEMPO REAL)
-// Cada 5 segundos revisa ADB de manera invisible y le avisa a React si algo cambió
+// CICLO EN SEGUNDO PLANO (ADB en tiempo real)
 setInterval(async () => {
     try {
         const devices = await obtenerEstadoCompletoDispositivos();
@@ -468,46 +498,13 @@ setInterval(async () => {
     } catch (e) {}
 }, 5000); 
 
-const dispositivosOcupados = new Set(); // Memoria para saber quién está trabajando
-
-async function procesarCola() {
-    try {
-        // Buscamos las tareas que están en espera
-        const tareasPendientes = await HistorialTarea.findAll({
-            where: { status: 'En cola' },
-            order: [['createdAt', 'ASC']] // Las más viejas primero
-        });
-
-        if (tareasPendientes.length === 0) return; // Nada que hacer
-
-        for (const tarea of tareasPendientes) {
-            // Si el dispositivo ya está trabajando, saltamos esta tarea por ahora
-            if (dispositivosOcupados.has(tarea.deviceId)) continue;
-
-            // Bloqueamos el dispositivo
-            dispositivosOcupados.add(tarea.deviceId);
-            
-            // Actualizamos estado a "Ejecutando" y avisamos a React
-            await tarea.update({ status: 'Ejecutando', mensaje: 'Procesando en Appium...' });
-            io.emit('cola_actualizada');
-            io.emit('historial_actualizado');
-
-            // Mandamos a ejecutar sin detener el ciclo (sin await aquí)
-            ejecutarTarea(tarea).catch(console.error);
-        }
-    } catch (error) {
-        console.error("Error al procesar la cola:", error);
-    }
-}
-
 // ==========================================
-// 🔥 4. EL NUEVO GESTOR DE COLA SECUENCIAL (WORKER)
+// GESTOR DE COLA SECUENCIAL (WORKER ÚNICO)
 // ==========================================
 let appiumOcupado = false; 
-let globalCooldownMs = 15000; // Por defecto 15 segs
+let globalCooldownMs = 15000; 
 
 async function procesarCola() {
-    // Si Appium está trabajando o en sus 5 mins de descanso, el capataz no hace nada
     if (appiumOcupado) return; 
 
     try {
@@ -522,15 +519,13 @@ async function procesarCola() {
             return;
         }
 
-        appiumOcupado = true; // 🔒 Cerramos la puerta para que ningún otro celular entre
+        appiumOcupado = true; // Bloqueamos el paso para ejecuciones concurrentes
         
-        // Avisamos a React (para que la Cola y la Tarjeta cambien a Ejecutando)
         await tarea.update({ status: 'Ejecutando', mensaje: 'Procesando en Appium...' });
         io.emit('cola_actualizada');
         io.emit('estado_dispositivo', { id: tarea.deviceId, status: 'Ejecutando...' });
 
-        // EJECUTAMOS LA AUTOMATIZACIÓN
-        let resultado = {mensaje: "Completado" };
+        let resultado = { mensaje: "Completado" };
         let huboError = false;
         try {
             switch (tarea.action) {
@@ -545,17 +540,15 @@ async function procesarCola() {
             await tarea.update({ status: 'Error', mensaje: error.message });
         }
 
-        // Avisamos que terminó para cambiar la tarjeta a "Hecho!"
         io.emit('estado_dispositivo', { id: tarea.deviceId, status: huboError ? 'Error' : 'Hecho!', action: null });
         io.emit('cola_actualizada'); 
         io.emit('historial_actualizado'); 
 
-        // ⏳ APLICAMOS TU DELAY DE 5 MINUTOS (O EL QUE PONGAS)
-        console.log(`\n⏱️ Tarea terminada. Esperando cooldown de ${globalCooldownMs / 1000} segundos antes de arrancar el siguiente...\n`);
+        console.log(`\nTarea terminada. Esperando cooldown de ${globalCooldownMs / 1000} segundos...\n`);
         
         setTimeout(() => {
-            appiumOcupado = false; // 🔓 Abrimos la puerta de nuevo
-            procesarCola(); // Llamamos al capataz para que atienda al que sigue en la fila
+            appiumOcupado = false; // Liberamos Appium
+            procesarCola(); // Llamamos al worker para procesar el siguiente elemento
         }, globalCooldownMs);
 
     } catch (error) {
@@ -609,7 +602,7 @@ app.post('/api/execute-task', async (req, res) => {
 
         res.status(200).json({ success: true, message: "En cola" });
     } catch (error) {
-        console.error("❌ Error CRÍTICO al guardar en BD:", error);
+        console.error("Error CRÍTICO al guardar en BD:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -623,7 +616,6 @@ app.get('/api/queue', async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
-// 🔥 NUEVO ENDPOINT: Cancelar/Eliminar una tarea de la cola
 app.put('/api/queue/cancel/:id', async (req, res) => {
     try {
         const tarea = await HistorialTarea.findByPk(req.params.id);
@@ -635,24 +627,14 @@ app.put('/api/queue/cancel/:id', async (req, res) => {
     } catch (error) { res.status(500).json({ success: false }); }
 });
 
-
-// EL ENDPOINT DE HISTORIAL AHORA FILTRA LO TERMINADO
+// Endpoint del historial limpio (Filtra solo los estados finales)
 app.get('/api/history', async (req, res) => {
     try {
         const historial = await HistorialTarea.findAll({ 
             where: { status: { [Op.in]: ['Éxito', 'Fallido', 'Error', 'Cancelado'] } }, order: [['createdAt', 'DESC']] 
         });
         res.status(200).json({ success: true, history: historial });
-    } catch (error) { res.status(500).json({ success: false }); }
-});
-
-app.get('/api/history', async (req, res) => {
-    try {
-        const historial = await HistorialTarea.findAll({ order: [['createdAt', 'DESC']] });
-        res.status(200).json({ success: true, history: historial });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
 app.get('/api/devices', async (req, res) => {
@@ -677,7 +659,6 @@ app.put('/api/devices/:udid/rename', async (req, res) => {
             await Dispositivo.create({ udid: udid, name: udid, customName: customName });
         }
         
-        // 🔥 AL RENOMBRAR, REESCANEA Y AVISA A TODOS LOS CLIENTES DE INMEDIATO
         const devices = await obtenerEstadoCompletoDispositivos();
         io.emit('dispositivos_actualizados', devices);
         
@@ -688,18 +669,17 @@ app.put('/api/devices/:udid/rename', async (req, res) => {
 });
 
 // ==========================================
-// INICIAR SERVIDOR HTTP (EN VEZ DE EXPRESS DIRECTO)
+// INICIAR SERVIDOR HTTP (MÓDULO COMPLETO)
 // ==========================================
 const PORT = 3000;
 app.use(express.static('public')); 
 
 sequelize.sync({ alter: true }) 
   .then(() => {
-    console.log('💾 Base de datos SQLite sincronizada correctamente.');
-    server.listen(PORT, () => console.log(`Servidor HTTP/WebSocket listo en http://localhost:${PORT}`));
-    //Se procesa la cola para ver si hay tareas pendientes (Por si se va la luz)
+    console.log('Base de datos SQLite sincronizada correctamente.');
+    server.listen(PORT, '0.0.0.0', () => console.log(`Servidor HTTP/WebSocket listo en la red local ${PORT}`));
     procesarCola(); 
   })
   .catch(err => {
-    console.error('❌ Error crítico al inicializar la Base de Datos:', err);
+    console.error('Error crítico al inicializar la Base de Datos:', err);
   });

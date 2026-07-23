@@ -6,7 +6,7 @@ import ColaTareas from './components/ColaTareas';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 
-const socket = io('http://localhost:3000');
+const socket = io('http://192.168.1.253:3000');
 
 function App() {
   const [devices, setDevices] = useState([]);
@@ -21,7 +21,7 @@ useEffect(() => {
           const prevDev = prev.find(d => d.id === nuevoDev.id);
           
           if (prevDev) {
-            // 🔥 CORRECCIÓN: Respetamos SIEMPRE la posición del switch (encendido/apagado) 
+            // CORRECCIÓN: Respetamos SIEMPRE la posición del switch (encendido/apagado) 
             // que el usuario haya elegido, ignorando el "true" que manda el servidor.
             let devActualizado = { ...nuevoDev, active: prevDev.active };
             
@@ -58,7 +58,7 @@ useEffect(() => {
   useEffect(() => {
     const cargarDispositivosIniciales = async () => {
       try {
-        const response = await axios.get('http://localhost:3000/api/devices');
+        const response = await axios.get('http://192.168.1.253:3000/api/devices');
         if (response.data.success) setDevices(response.data.devices); 
       } catch (error) { console.error("Error al cargar dispositivos iniciales:", error); }
     };
@@ -68,7 +68,7 @@ useEffect(() => {
   const scanDevices = async () => {
     setIsScanning(true);
     try {
-      const response = await axios.get('http://localhost:3000/api/devices');
+      const response = await axios.get('http://192.168.1.253:3000/api/devices');
       if (response.data.success) setDevices(response.data.devices);
     } catch (error) { console.error("Error al escanear:", error); } 
     finally { setIsScanning(false); }
@@ -107,9 +107,9 @@ useEffect(() => {
 
     // Despachamos las tareas a la base de datos
     for (const device of activeDevices) {
-      console.log(`📡 [Tarea Global] Despachando a la cola para: ${device.name}`);
+      console.log(`[Tarea Global] Despachando a la cola para: ${device.name}`);
       try {
-        const response = await axios.post('http://localhost:3000/api/execute-task', {
+        const response = await axios.post('http://192.168.1.253:3000/api/execute-task', {
           deviceId: device.id,
           deviceName: device.name,
           action: taskName,
@@ -117,9 +117,9 @@ useEffect(() => {
           comment: commentText,
           delayMs: tiempoDeEspera
         });
-        console.log(`✅ [Tarea Global] Servidor aceptó la tarea de ${device.name}:`, response.data);
+        console.log(`[Tarea Global] Servidor aceptó la tarea de ${device.name}:`, response.data);
       } catch (error) { 
-        console.error(`❌ [Tarea Global] Error en la petición para ${device.name}:`, error); 
+        console.error(`[Tarea Global] Error en la petición para ${device.name}:`, error); 
       }
     }
   };

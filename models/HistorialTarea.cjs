@@ -16,7 +16,7 @@ const HistorialTarea = sequelize.define('HistorialTarea', {
     allowNull: true
   },
   action: {
-    type: DataTypes.STRING, // 'Seguir cuenta', 'Reaccionar a un post', 'Comentar en un post'
+    type: DataTypes.STRING, // 
     allowNull: false
   },
   url: {
@@ -24,18 +24,18 @@ const HistorialTarea = sequelize.define('HistorialTarea', {
     allowNull: false
   },
   comment: {
-    type: DataTypes.TEXT, // Almacena el comentario en caso de que aplique
+    type: DataTypes.TEXT, 
     allowNull: true
   },
   status: {
-    type: DataTypes.STRING, // 'En cola', 'Ejecutando', 'Éxito', 'Error', 'Cancelado'
+    type: DataTypes.STRING, 
     allowNull: false
   },
   mensaje: {
-    type: DataTypes.TEXT // Guarda el retorno exitoso o el mensaje del error
+    type: DataTypes.TEXT 
   }
 }, {
-  timestamps: true // Crea automáticamente las columnas 'createdAt' y 'updatedAt'
+  timestamps: true 
 });
 
 module.exports = HistorialTarea;

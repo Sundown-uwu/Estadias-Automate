@@ -2,7 +2,7 @@ import { RefreshCw, Plus } from 'lucide-react'; // Iconos para el diseño
 import DeviceCard from '../components/DeviceCard';
 import axios from 'axios';
 
-// 🔥 Ahora recibimos el estado global y la función de escaneo desde las Props (App.jsx)
+// Ahora recibimos el estado global y la función de escaneo desde las Props (App.jsx)
 export default function Dashboard({ devices, setDevices, isScanning, scanDevices }) {
 
   const toggleDevice = (id) => {
@@ -24,7 +24,7 @@ export default function Dashboard({ devices, setDevices, isScanning, scanDevices
     setDevices(prev => prev.map(d => d.id === id ? { ...d, status: "Ejecutando" } : d));
 
     try {
-      const response = await axios.post('http://localhost:3000/api/execute-task', {
+      const response = await axios.post('http://192.168.1.253:3000/api/execute-task', {
         deviceId: device.id,
         deviceName: device.name,
         action: device.action,

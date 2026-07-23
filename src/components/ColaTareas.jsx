@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { Clock, Play, Trash2, XCircle, CheckCircle } from 'lucide-react';
 
-const socket = io('http://localhost:3000');
+const socket = io('http://192.168.1.253:3000');
 
 const ColaTareas = () => {
     const [cola, setCola] = useState([]);
@@ -10,7 +10,7 @@ const ColaTareas = () => {
 
     const fetchCola = async () => {
         try {
-            const response = await fetch('http://localhost:3000/api/queue');
+            const response = await fetch('http://192.168.1.253:3000/api/queue');
             const data = await response.json();
             if (data.success) {
                 setCola(data.queue);
@@ -35,7 +35,7 @@ const ColaTareas = () => {
     const cancelarTarea = async (id) => {
         if (!window.confirm('¿Estás seguro de que deseas cancelar esta tarea pendiente?')) return;
         try {
-            const response = await fetch(`http://localhost:3000/api/queue/cancel/${id}`, {
+            const response = await fetch(`http://192.168.1.253:3000/api/queue/cancel/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' }
             });

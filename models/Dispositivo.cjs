@@ -1,10 +1,10 @@
 const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database.cjs'); // Importamos tu conexión a la BD
+const sequelize = require('../config/database.cjs'); // conexión a la BD
 
 const Dispositivo = sequelize.define('Dispositivo', {
     udid: {
         type: DataTypes.STRING,
-        primaryKey: true, // El ID único del celular será su código UDID
+        primaryKey: true, // código UDID
         allowNull: false
     },
     name: {
@@ -12,7 +12,7 @@ const Dispositivo = sequelize.define('Dispositivo', {
         allowNull: false
     },
     customName: {
-        type: DataTypes.STRING, // El nombre personalizado que le dará el usuario
+        type: DataTypes.STRING, // El nombre personalizado
         allowNull: true,
         defaultValue: ""
     }

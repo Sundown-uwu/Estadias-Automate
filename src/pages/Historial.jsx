@@ -9,7 +9,7 @@ export default function Historial() {
   const fetchHistory = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get('http://localhost:3000/api/history');
+      const response = await axios.get('http://192.168.1.253:3000/api/history');
       if (response.data.success) {
         setLogs(response.data.history);
       }

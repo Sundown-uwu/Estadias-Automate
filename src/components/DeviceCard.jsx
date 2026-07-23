@@ -53,7 +53,7 @@ export default function DeviceCard({ id, udid, name, customName, connected, isCo
     const identificador = udid || id; 
 
     try {
-      await axios.put(`http://localhost:3000/api/devices/${identificador}/rename`, {
+      await axios.put(`http://192.168.1.253:3000/api/devices/${identificador}/rename`, {
         customName: newName
       });
       if (onRefresh) onRefresh(); 
