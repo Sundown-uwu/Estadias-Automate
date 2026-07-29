@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { Clock, Play, Trash2, XCircle, CheckCircle } from 'lucide-react';
+import Swal from 'sweetalert2';
 
 const socket = io('http://192.168.1.253:3000');
 
@@ -32,23 +33,65 @@ const ColaTareas = () => {
         };
     }, []);
 
-    const cancelarTarea = async (id) => {
-        if (!window.confirm('¿Estás seguro de que deseas cancelar esta tarea pendiente?')) return;
-        try {
-            const response = await fetch(`http://192.168.1.253:3000/api/queue/cancel/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await response.json();
-            if (!data.success) {
-                alert(data.message || 'No se pudo cancelar la tarea.');
+ const cancelarTarea = (id) => {
+        Swal.fire({
+            title: '¿Cancelar tarea?',
+            text: "¿Estás seguro de que deseas cancelar esta tarea pendiente?",
+            icon: 'warning',
+            background: '#0f172a',
+            color: '#ffffff',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#334155',
+            confirmButtonText: 'Sí, cancelar',
+            cancelButtonText: 'Mantener',
+            customClass: {
+                popup: 'border border-slate-800 rounded-xl'
             }
-        } catch (error) {
-            console.error("Error al cancelar la tarea:", error);
-            alert('Ocurrió un error en la conexión con el servidor.');
-        }
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                try {
+                    const response = await fetch(`http://192.168.1.253:3000/api/queue/cancel/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await response.json();
+                    
+                    if (!data.success) {
+                        Swal.fire({
+                            title: 'Error',
+                            text: data.message || 'No se pudo cancelar la tarea.',
+                            icon: 'error',
+                            background: '#0f172a',
+                            color: '#ffffff',
+                            confirmButtonColor: '#3b82f6'
+                        });
+                    } else {
+                        // Alerta de éxito que se cierra sola rápido
+                        Swal.fire({
+                            title: '¡Cancelada!',
+                            text: 'La tarea fue eliminada de la cola.',
+                            icon: 'success',
+                            background: '#0f172a',
+                            color: '#ffffff',
+                            showConfirmButton: false,
+                            timer: 1500
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error al cancelar la tarea:", error);
+                    Swal.fire({
+                        title: 'Error de conexión',
+                        text: 'Ocurrió un error en la conexión con el servidor.',
+                        icon: 'error',
+                        background: '#0f172a',
+                        color: '#ffffff',
+                        confirmButtonColor: '#3b82f6'
+                    });
+                }
+            }
+        });
     };
-
     // Función auxiliar para los badges dinámicos de estado
     const renderStatusBadge = (status) => {
         if (status === 'Ejecutando') {

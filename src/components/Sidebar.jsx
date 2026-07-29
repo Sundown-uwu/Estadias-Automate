@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { RefreshCw, Play, LayoutDashboard, List, Clock } from 'lucide-react';
+import { RefreshCw, Play, LayoutDashboard, List, Clock, ChevronDown, Check } from 'lucide-react';
+import Swal from 'sweetalert2';
 
 export default function Sidebar({ 
   devices = [], 
@@ -10,19 +11,30 @@ export default function Sidebar({
   setCurrentView   
 }) {
   
-  // 📊 Cálculos en tiempo real
+  // Cálculos en tiempo real
   const totalDevices = devices.length;
   const activeDevices = devices.filter(d => d.active).length;
   const selectedDevices = devices.filter(d => d.action !== null).length;
 
-  // 🎛️ Estado local para el formulario de Tarea Global
+  // Estado local para el formulario de Tarea Global
   const [globalTask, setGlobalTask] = useState('');
   const [globalUrl, setGlobalUrl] = useState('');
-  const [globalComments, setGlobalComments] = useState([]); // Arreglo de frases
-  const [inputValue, setInputValue] = useState(''); // Lo que el usuario está escribiendo
-  const [globalDelay, setGlobalDelay] = useState('00:15'); // 15 segundos por defecto
+  const [globalComments, setGlobalComments] = useState([]); 
+  const [inputValue, setInputValue] = useState(''); 
+  const [globalDelay, setGlobalDelay] = useState('00:15'); 
 
-  // Función para hacer capturar el "Enter" o la "Coma"
+  // Estado para controlar la apertura del menú desplegable personalizado
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Lista de opciones disponibles para el menú personalizado
+  const taskOptions = [
+    { value: 'Seguir cuenta', label: 'Seguir cuenta' },
+    { value: 'Reaccionar a un post', label: 'Reaccionar a un post' },
+    { value: 'Comentar en un post', label: 'Comentar en un post' },
+    { value: 'Mirar transmisión', label: 'Mirar transmisión (Prueba)' },
+  ];
+
+  // Función para capturar "Enter" o "Coma" en los comentarios
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
@@ -35,34 +47,58 @@ export default function Sidebar({
     }
   };
 
-  // Función para eliminar un comentario al dar clic en la "X"
+  // Función para eliminar un comentario
   const removeComment = (indexToRemove) => {
     setGlobalComments(globalComments.filter((_, index) => index !== indexToRemove));
   };
 
-  // 🔥 NUEVA FUNCIÓN: Formatea el tiempo a MM:SS automáticamente
+  // Formatea el tiempo a MM:SS automáticamente
   const handleTimeChange = (e) => {
-    // 1. Capturamos el valor y eliminamos todo lo que NO sea un número
     let rawValue = e.target.value.replace(/\D/g, '');
-
-    // 2. Limitamos a un máximo de 4 dígitos (MMSS)
     rawValue = rawValue.slice(0, 4);
 
-    // 3. Si ya hay más de 2 dígitos, inyectamos los ':' en medio
     if (rawValue.length > 2) {
       rawValue = rawValue.slice(0, 2) + ':' + rawValue.slice(2);
     }
 
-    // 4. Actualizamos el estado
     setGlobalDelay(rawValue); 
   };
 
   const handleGlobalSubmit = () => {
     if (!globalTask || !globalUrl) {
-      return alert("Por favor selecciona una tarea e ingresa una URL.");
+      return Swal.fire({
+        title: 'Campos incompletos',
+        text: 'Por favor selecciona una tarea e ingresa una URL válida.',
+        icon: 'warning',
+        background: '#0f172a',
+        color: '#ffffff',
+        confirmButtonColor: '#3b82f6'
+      });
     }
-    if (globalTask === 'Comentar en un post' && globalComments.length === 0) {
-      return alert("Por favor añade al menos un comentario a la lista.");
+
+    if (globalTask === 'Comentar en un post') {
+      if (globalComments.length === 0) {
+        return Swal.fire({
+          title: 'Sin comentarios',
+          text: 'Por favor añade al menos un comentario a la lista.',
+          icon: 'warning',
+          background: '#0f172a',
+          color: '#ffffff',
+          confirmButtonColor: '#3b82f6'
+        });
+      }
+
+      if (globalComments.length < activeDevices) {
+        const faltantes = activeDevices - globalComments.length;
+        return Swal.fire({
+          title: 'Comentarios insuficientes',
+          html: `Tienes <b class="text-blue-400">${activeDevices}</b> dispositivos activos, pero solo has añadido <b class="text-yellow-400">${globalComments.length}</b> comentario(s).<br/><br/>Por favor añade al menos <b class="text-green-400">${faltantes}</b> comentario(s) más para continuar.`,
+          icon: 'warning',
+          background: '#0f172a',
+          color: '#ffffff',
+          confirmButtonColor: '#3b82f6'
+        });
+      }
     }
 
     onGlobalExecute(globalTask, globalUrl, globalComments, globalDelay);
@@ -81,7 +117,7 @@ export default function Sidebar({
           Dashboard de automatización<br />de interacciones
         </p>
 
-        {/* 🔥 NAVEGACIÓN ACTUALIZADA CON COLA DE TAREAS 🔥 */}
+        {/* NAVEGACIÓN */}
         <div className="space-y-2 mb-8">
           <button 
             onClick={() => setCurrentView('dashboard')}
@@ -107,7 +143,6 @@ export default function Sidebar({
             Historial de Tareas
           </button>
 
-          {/* 🔥 NUEVO BOTÓN: COLA DE TAREAS */}
           <button 
             onClick={() => setCurrentView('cola')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
@@ -120,8 +155,8 @@ export default function Sidebar({
             Cola de Tareas
           </button>
         </div>
-        {/* =========================================== */}
 
+        {/* RESUMEN */}
         <h3 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Resumen</h3>
         <div className="space-y-4 text-base mb-8">
           <div className="flex justify-between items-center">
@@ -144,17 +179,63 @@ export default function Sidebar({
           <p className="text-xs text-gray-400 mb-4 text-center">Aplica a todos los dispositivos activos</p>
           
           <div className="space-y-3">
-            <select 
-              className="w-full bg-[#111827] border border-[#334155] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-              value={globalTask}
-              onChange={(e) => setGlobalTask(e.target.value)}
-            >
-              <option value="" disabled>Seleccionar tarea...</option>
-              <option value="Seguir cuenta">Seguir cuenta</option>
-              <option value="Reaccionar a un post">Reaccionar a un post</option>
-              <option value="Comentar en un post">Comentar en un post</option>
-              <option value="Mirar transmisión">Mirar transmisión (Prueba)</option>
-            </select>
+            
+            {/* MENÚ DESPLEGABLE PERSONALIZADO */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className={`w-full bg-[#111827] border ${
+                  isDropdownOpen ? 'border-blue-500 ring-1 ring-blue-500' : 'border-[#334155] hover:border-gray-500'
+                } rounded-lg px-3 py-2 text-sm text-left text-white focus:outline-none flex items-center justify-between transition-all cursor-pointer`}
+              >
+                <span className={globalTask ? 'text-white' : 'text-gray-400'}>
+                  {globalTask 
+                    ? (taskOptions.find(o => o.value === globalTask)?.label || globalTask) 
+                    : 'Seleccionar tarea...'
+                  }
+                </span>
+                <ChevronDown 
+                  size={16} 
+                  className={`text-gray-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-blue-400' : ''}`} 
+                />
+              </button>
+
+              {isDropdownOpen && (
+                <>
+                  {/* Capa invisible para cerrar el menú al hacer clic afuera */}
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setIsDropdownOpen(false)} 
+                  />
+
+                  {/* Lista desplegable con diseño personalizado */}
+                  <div className="absolute left-0 right-0 mt-1.5 bg-[#111827] border border-[#334155] rounded-xl shadow-2xl py-1 z-20 overflow-hidden backdrop-blur-md">
+                    {taskOptions.map((option) => {
+                      const isSelected = globalTask === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => {
+                            setGlobalTask(option.value);
+                            setIsDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-3.5 py-2.5 text-xs sm:text-sm flex items-center justify-between transition-all cursor-pointer ${
+                            isSelected 
+                              ? 'bg-blue-600/20 text-blue-400 font-medium' 
+                              : 'text-gray-300 hover:bg-[#1e293b] hover:text-white'
+                          }`}
+                        >
+                          <span>{option.label}</span>
+                          {isSelected && <Check size={14} className="text-blue-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
 
             <input 
               type="text" 
@@ -164,7 +245,7 @@ export default function Sidebar({
               onChange={(e) => setGlobalUrl(e.target.value)}
             />
 
-            {/* 🔥 CONTROL DE ESPERA ACTUALIZADO */}
+            {/* CONTROL DE ESPERA */}
             <div className="flex items-center justify-between bg-[#111827] border border-[#334155] rounded-lg px-3 py-2">
               <span className="text-sm text-gray-300">Espera (MM:SS):</span>
               <input 
@@ -173,15 +254,14 @@ export default function Sidebar({
                 maxLength={5}
                 className="w-16 bg-[#272727] text-center text-sm text-white rounded border border-[#3f3f3f] focus:outline-none focus:border-blue-500 tracking-widest"
                 value={globalDelay}
-                onChange={handleTimeChange} // <-- Inyectamos la magia aquí
+                onChange={handleTimeChange}
               />
             </div>
 
+            {/* SECCIÓN DE COMENTARIOS */}
             {globalTask === 'Comentar en un post' && (
-              <div className="flex flex-col gap-1">
-                <div 
-                  className="w-full bg-[#111827] border border-[#334155] rounded-lg p-2 flex flex-wrap gap-2 focus-within:border-blue-500 transition-colors min-h-[80px] max-h-[150px] overflow-y-auto custom-scrollbar"
-                >
+              <div className="flex flex-col gap-1.5">
+                <div className="w-full bg-[#111827] border border-[#334155] rounded-lg p-2 flex flex-wrap gap-2 focus-within:border-blue-500 transition-colors min-h-[80px] max-h-[150px] overflow-y-auto custom-scrollbar">
                   {globalComments.map((comment, index) => (
                     <span 
                       key={index} 
@@ -207,7 +287,24 @@ export default function Sidebar({
                     className="flex-1 bg-transparent text-sm text-white focus:outline-none min-w-[140px] py-1 px-1"
                   />
                 </div>
-                <span className="text-[10px] text-gray-500 ml-1">Introduce una coma o presiona Enter detrás de cada etiqueta</span>
+
+                <div className="flex justify-between items-center text-xs px-1">
+                  <span className="text-[10px] text-gray-500">Presiona Enter o Coma</span>
+                  {activeDevices > 0 && (
+                    <span className={`text-xs font-semibold ${
+                      globalComments.length >= activeDevices ? 'text-green-400' : 'text-amber-400'
+                    }`}>
+                      {globalComments.length} / {activeDevices} requeridos
+                    </span>
+                  )}
+                </div>
+
+                {activeDevices > 0 && globalComments.length < activeDevices && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs p-2 rounded-lg flex items-center gap-2 mt-1">
+                    <span>⚠️</span>
+                    <span>Añade <strong>{activeDevices - globalComments.length}</strong> comentario(s) más.</span>
+                  </div>
+                )}
               </div>
             )}
 

@@ -236,16 +236,26 @@ async function likearPostInstagram(deviceId, deviceName, urlPost) {
         }
 
         if (botonALikear) {
+            // Leemos el estado interno de Android y el texto
+            const isSelected = await botonALikear.getAttribute('selected');
             const description = await botonALikear.getAttribute('content-desc');
-            if (description === "Ya no me gusta") {
-                return { success: true, mensaje: `El post/reel ya tenía tu "Me gusta". Misión cumplida.` };
+            const descNormalizada = description ? description.toLowerCase() : "";
+            
+            // ESTO ES CLAVE: Nos dirá exactamente qué ve Appium en la consola
+            console.log(`[Appium] Estado interno -> Selected: ${isSelected} | Text: "${descNormalizada}"`);
+
+            // Validación doble: Si el botón está "seleccionado" internamente O el texto dice que ya tiene like
+            if (isSelected === 'true' || descNormalizada.includes("ya no") || descNormalizada.includes("unlike")) {
+                console.log('El post ya tenía like. Omitiendo clic para no quitarlo.');
+                return { success: true, mensaje: "Ya se ha dado like antes" }; 
             } else {
+                console.log('El post no tiene like. Haciendo clic...');
                 await botonALikear.click();
                 await driver.pause(2000);
-                return { success: true, mensaje: `¡Like dado con éxito al post/reel!` };
+                return { success: true, mensaje: "¡Like dado con éxito al post/reel!" };
             }
         } else {
-            console.log('Botón de Like no encontrado ni con scroll. ACTIVANDO PLAN B: Doble Tap ✌️');
+            console.log('Botón de Like no encontrado ni con scroll. ACTIVANDO PLAN B: Doble Tap ');
             
             let centroX, centroY;
             const contenedorPost = await driver.$('id=com.instagram.android:id/zoomable_view_container');

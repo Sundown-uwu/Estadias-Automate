@@ -23,6 +23,7 @@
     "socket.io-client": "^4.8.3",
     "socket.oi": "^0.0.1-security.8",
     "sqlite3": "^6.0.1",
+    "sweetalert2": "^11.26.25",
     "webdriverio": "^9.27.2"
   },
   "devDependencies": {

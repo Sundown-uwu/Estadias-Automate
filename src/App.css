@@ -182,3 +182,37 @@
     border-right-color: var(--border);
   }
 }
+
+/* ==================================================== */
+/* ESTILOS PERSONALIZADOS PARA LA BARRA DE DESPLAZAMIENTO */
+/* ==================================================== */
+
+/* 1. Compatibilidad para Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0f172a;
+}
+
+/* 2. Ancho y tamaño general de la barra (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px; /* Para barras horizontales si llegaran a aparecer */
+}
+
+/* 3. El fondo de la barra (El "carril" por donde baja) */
+::-webkit-scrollbar-track {
+  background: #0f172a; /* Color oscuro base de tu app */
+  border-left: 1px solid #1e293b; /* Sutil línea separadora */
+}
+
+/* 4. La barra móvil (El "pulgar") */
+::-webkit-scrollbar-thumb {
+  background-color: #334155; /* Color gris/azulado elegante */
+  border-radius: 10px; /* Bordes completamente redondeados */
+  border: 2px solid #0f172a; /* Crea un falso "padding" para que la barra se vea más delgada y flotante */
+}
+
+/* 5. Efecto Hover cuando pasas el mouse por encima de la barra */
+::-webkit-scrollbar-thumb:hover {
+  background-color: #475569; /* Brilla ligeramente al pasar el cursor */
+}
